@@ -27,7 +27,7 @@ def main() -> None:
     ap.add_argument("--chunk-seconds", type=int, default=10)
     ap.add_argument("--rate", type=int, default=16000)
     ap.add_argument("--codec", choices=["auto", "pcm", "opus"], default="auto")
-    ap.add_argument("--uart", action="store_true", help="byte-stream UART framing instead of BLE GATT frames")
+    ap.add_argument("--uart", action="store_true", help="byte-stream serial framing (USB CDC, or a UART) instead of BLE GATT frames")
     ap.add_argument("--lost-clock", action="store_true", help="device boots without knowing UTC")
     ap.add_argument("--flaky", action="store_true", help="drop the link mid-transfer, then reconnect")
     ap.add_argument("--whisper", action="store_true", help="use faster-whisper if installed")

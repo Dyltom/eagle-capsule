@@ -51,16 +51,19 @@ lawyer, before wearing this around other people.
 
 1. **A physical privacy switch, enforced by firmware.** Flick it when you walk
    into a meeting, a shop or a friend's house. The switch is read by the firmware
-   (D5), which stops the PDM and drives the mic's power line (P1.10) LOW, so the
-   mic is unpowered, not just muted ([WIRING §4](WIRING.md)). **Limitation:** this
+   (D5), which stops the PDM and cuts the external mic's power (D2 LOW), with the
+   XIAO's onboard mic held off (P1.10 LOW), so the mic is unpowered, not just muted
+   ([WIRING §4](WIRING.md)). **Limitation:** this
    is only as good as the firmware. A bug or a malicious image could ignore the
    switch. Signed images and owner-built firmware reduce that risk but don't
    remove it. A switch that interrupts mic power in hardware is a possible v2
-   upgrade (it needs rework on the XIAO or a custom board).
-2. **A visible recording indicator, required whenever it records off the dock.**
+   upgrade: now that the mic is on its own small board, a double-pole switch can
+   break its supply directly ([WIRING §4](WIRING.md)).
+2. **A visible recording indicator, required whenever it records unplugged.**
    A low-brightness LED (blinking, µA average) that is on whenever the capsule is
    worn and recording, so people around you can tell. It also helps socially.
-   On the dock, in your own bedroom, it may be dimmed or turned off at night.
+   Plugged in on the bedside stand, in your own bedroom, it may be dimmed or turned
+   off at night.
    ([WIRING §5](WIRING.md))
 3. **Consent-friendly defaults.** A "solo mode" is the expected everyday use:
    your own voice notes, thinking out loud, sleep audio in your own room. Record

@@ -4,8 +4,10 @@ The starting plan came from a Gemini conversation (see [CREDITS](../CREDITS.md))
 This page re-checks each of its claims against primary sources: vendor pages,
 the Seeed wiki, the TI BQ25101 datasheet, the Nordic product spec and the
 BasedHardware/omi source. A second AI review (ChatGPT, Nov 2026) is checked
-[at the end](#second-review-chatgpt-nov-2026). Verdicts: ✅ holds, ⚠️ partly right / needs a change,
-❌ wrong.
+[further down](#second-review-chatgpt-nov-2026). Verdicts: ✅ holds, ⚠️ partly right / needs a change,
+❌ wrong. The owner's later decisions (USB-C only, 600 mAh, IM73D122 mic) are
+[at the end](#what-changed-after-the-reviews-owner-decisions-nov-2026); the review text
+above them is kept as it was written.
 
 ## Claims about parts
 
@@ -71,7 +73,9 @@ The concept is **viable**. Nothing physical blocks it. Against 24 h of
 continuous recording a 400 mAh cell has ~1.6× margin in the worst case (39 h)
 and ~4.5× typical (108 h); against a 16 h day, 2.4× to 6.8×. The plan needed corrections (diode, antenna
 placement, switch role, UART sync, encryption, IMU gating). The legal
-constraints are a design input, not an afterthought.
+constraints are a design input, not an afterthought. (Since then the default cell is
+600 mAh: ~57 h worst, ~152 h typical. The diode and UART sync were later dropped with the
+dock; see the end of this page.)
 
 ## Second review: ChatGPT (Nov 2026)
 
@@ -90,7 +94,7 @@ could only find an estimate.
 | 100 mA charging takes ≥ 4 h from empty | ✅ | True, but rarely relevant: a typical day off the dock uses 50–120 mAh, which refills in 0.7–2.1 h at 100 mA. |
 | BLE sync at 50 KB/s moves 230 MB in 77 min | ❌ | The arithmetic is right; the rate is optimistic. Boswell **measured** 5.07 kB/s pulling a file over GATT notifications while still recording, on the same board ([STANDALONE_CAPTURE.md](https://github.com/leakydata/boswell/blob/main/STANDALONE_CAPTURE.md)). That transfer is throttled on purpose so recording keeps running, so it is a floor, not the chip's limit. At 5 KB/s a 24 kbps day (~260 MB) takes ~14 h, more than a night. So the **dock UART** (~90 KB/s, ~0.8 h) becomes the primary sync path. BLE becomes the fallback on a dock with no UART host, plus on-demand pulls; it stays off or barely advertising while worn. |
 | Dock with USB data over two pogo pins | ⚠️ | Considered and rejected. USB D+/D− across sprung magnetic contacts is a signal-integrity risk, and USB mass storage fights the recorder for the filesystem (Boswell refuses BLE transfers while a USB host owns the volume, for the same reason). A UART is two wires, any speed works, and the firmware keeps owning the card. |
-| Size allowance 52–58 × 33–40 × 14–18 mm, 25–35 g | ✅ | Our CAD is 37.4 × 49.7 × 18.6 mm, ~36 g: shorter than the range, inside it on width, 0.6 mm thicker and ~1 g heavier than its upper end. |
+| Size allowance 52–58 × 33–40 × 14–18 mm, 25–35 g | ✅ | Our CAD is 37.4 × 49.7 × 18.6 mm, ~36 g: shorter than the range, inside it on width, 0.6 mm thicker and ~1 g heavier than its upper end. (Now 41.4 × 44.3 × 18.35 mm with the 600 mAh cell and no dock connector, ~38 g with the eagle plate: wider than the range, 0.35 mm thicker, ~3 g heavier.) |
 | Mute must work with USB power present | ✅ | Already covered: [WIRING](WIRING.md), "Docked 'off' isn't off". |
 | Test three wearing placements for transcription quality | ✅ | Good idea, and it wasn't explicit. Added to Gate 2 in [BUILD-SIMULATION](BUILD-SIMULATION.md) as a placement protocol. |
 | Security: authenticated access, encryption at rest, physical off control, status indication, home interface only on the private network or Tailscale | ✅ | The first four are in [SYNC-PROTOCOL](SYNC-PROTOCOL.md) (LESC bonding + AUTH, X25519/AES-GCM per chunk), [WIRING](WIRING.md) and [LEGAL](LEGAL.md). The network note is now in [`host/README.md`](../host/README.md). |
@@ -114,10 +118,21 @@ evidence in this round, because it reports measurements from real hardware:
 
 ### What changed in the plan
 
-- **The dock UART is built from the start** and is the primary sync path. BLE is the fallback (docked with no UART host, or an on-demand pull), not a continuous daytime link, and its Gate 2 check now only sets expectations ([BUILD-SIMULATION](BUILD-SIMULATION.md)).
+- **The dock UART is built from the start** and is the primary sync path (superseded: USB CDC over the capsule's USB-C port replaced it, see the next section). BLE is the fallback (docked with no UART host, or an on-demand pull), not a continuous daytime link, and its Gate 2 check now only sets expectations ([BUILD-SIMULATION](BUILD-SIMULATION.md)).
 - Gate 2 gains a **three-placement audio test** (upper chest outside the shirt, collar edge, under a T-shirt) × (quiet room, outdoors, walking), judged on names and commitments.
 - The codec thread stack starts at **24 KB** (Boswell's measurement), not 16.
 - **XIAO nRF54LM20A Sense** and **Boswell** are added to [ALTERNATIVES](ALTERNATIVES.md). Boswell is also in [CREDITS](../CREDITS.md) as a reference; we copied no code.
 - New [MEMORY.md](MEMORY.md): provenance, said / verified / committed / inferred, correction and deletion, and guarding against false memories.
 - [`host/README.md`](../host/README.md) gains "Running it at home" (NAS for storage, Apple Silicon Mac for transcription, private network or Tailscale only).
 - The wire SKU note now says that ADA2517 and ADA2518 are the same wire in black and white, and ADA5358 stock is flagged as a risk.
+
+## What changed after the reviews (owner decisions, Nov 2026)
+
+Three decisions by the owner, applied across the docs. The verdicts above are kept as
+written; where they cite the pogo dock, its diode or the dock UART, read them as history.
+
+| Decision | What it replaces | Why, and the cost |
+|---|---|---|
+| **USB-C is the only charge and sync path.** Plug a cable into the capsule's side port: any charger charges it (100 mA, still recording); the PC also syncs it over **USB CDC-ACM** with the same SLIP + CRC-32 framing. BLE stays as the wireless fallback and on-demand pull. The nightstand dock becomes an optional printed stand with no electronics | The ADA5358 magnetic pogo connector, the dock's Schottky diode (claim 1 above), its USB-C breakout, and the dock UART through the spare pogo pins (claim 3 and the ChatGPT row on BLE sync) with a USB-serial adapter | Fewer parts (~A$30 less), no back-feed problem to design around (nothing else feeds the 5V pin), no pin map that can mate rotated, and a faster link: USB CDC is estimated at ~100–300 KB/s, vs ~90 KB/s for the UART (an **estimate**; T11 measures it). The earlier objection to "USB data over two pogo pins" (sprung magnetic contacts) doesn't apply to a real USB-C plug. Cost: the USB-C port is worn-exposed (dust cap, sweat, lint, connector wear), and plugging in is a two-handed job in the dark. [WIRING §3](WIRING.md), [SYNC-PROTOCOL §5](SYNC-PROTOCOL.md) |
+| **Default battery 600 mAh** (Little Bird LB-00237, 29 × 36 × 5.5 mm, 10.5 g) | The 400 mAh CE04375 default (now an option, as is 1100 mAh) | 50% more charge for ~4 mm of width (CAD). Model: ~152 h typical, ~57 h worst. Gate 3's bar moves from 35% to 55% left ([BUILD-SIMULATION](BUILD-SIMULATION.md)). The listing claims built-in protection; not yet checked on a cell |
+| **Better mic: one Infineon IM73D122 on a small custom PCB** (PDM CLK D4, DATA D6, power D2; onboard mic held off) | The stock mic for v1, and the T5838 upgrade path in [ALTERNATIVES §3](ALTERNATIVES.md#3-microphone-choice) | ~+6–7 dB SNR at our 1.28 MHz clock (unverified), ~+0.1–0.5 mA (unverified), ~A$70–80. **Correction:** the earlier T5838 recommendation was wrong for the nRF52840, whose 16 kHz PDM clocks (1.0–1.33 MHz) fall between the T5838's low-power and high-quality modes. The IM73D122's normal mode (1.2–1.65 MHz) covers 1.28 MHz; the 1.032 MHz default is out of its spec. Gate 2 compares it with the stock mic |

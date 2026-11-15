@@ -21,11 +21,14 @@ or wrong, please open an issue and we'll fix it.
 | XIAO nRF52840 Sense (102010469) | **Seeed Studio** | MCU, PDM mic, IMU and LiPo charger. Docs: https://wiki.seeedstudio.com/XIAO_BLE/ |
 | nRF52840 SoC, Power Profiler Kit II | **Nordic Semiconductor** | The radio and CPU; the PPK2 measures current for Gate 2 |
 | BQ25101 charger IC | **Texas Instruments** | The charger on the XIAO |
+| IM73D122 PDM MEMS microphone | **Infineon Technologies** | The capsule's mic, on a small custom PCB. Datasheet: https://www.infineon.com/dgdl/Infineon-IM73D122-DataSheet-v01_00-EN.pdf?fileId=8ac78c8c83cd3081018409cafdfb46db |
 | microSD breakout #2597 | **Pololu** | https://www.pololu.com/product/2597 |
-| DIY Magnetic Connector #5358, slide switch #805, silicone wire #2517/2518 (26 AWG) and #3164/3169 (30 AWG), USB-C breakout #4090 (dock), Qi receiver #1901 (evaluated and rejected) | **Adafruit Industries** | https://www.adafruit.com |
+| Slide switch #805, silicone wire #2517/2518 (26 AWG) and #3164/3169 (30 AWG). Evaluated and dropped: Qi receiver #1901, and the DIY Magnetic Connector #5358 and USB-C breakout #4090 of the earlier pogo dock (USB-C on the XIAO replaced them) | **Adafruit Industries** | https://www.adafruit.com |
 | SPI SD NAND #4899 (optional alternative to microSD) | **Adafruit Industries** | |
 | Debug Probe | **Raspberry Pi Ltd** | One-time SWD flashing of MCUboot |
-| LiPo cells CE04375 / CE04377 | **Core Electronics** | Australian supplier for the parts list: https://core-electronics.com.au |
+| LiPo cells CE04375 (400 mAh) / CE04377 (1100 mAh), both options | **Core Electronics** | Australian supplier for the parts list: https://core-electronics.com.au |
+| LiPo cell LB-00237 (600 mAh, the default) | **Little Bird Electronics** | https://littlebirdelectronics.com.au/products/lithium-ion-polymer-battery-3-7v-600mah |
+| IM73D122 supply | **DigiKey** | https://www.digikey.com.au/en/products/detail/infineon-technologies/IM73D122V01XTMA1/16999563 |
 
 ## Software we plan to use
 
@@ -36,6 +39,7 @@ or wrong, please open an issue and we'll fix it.
 | OpenAI Whisper and SYSTRAN faster-whisper | Local transcription | MIT |
 | Silero VAD | Server-side voice activity detection | MIT |
 | bleak | BLE from Python on the PC | MIT |
+| pyserial | USB CDC serial sync from Python on the PC | BSD-3-Clause |
 | pyca/cryptography | X25519, HKDF, AES-GCM in the host pipeline | Apache-2.0 / BSD |
 | MCUboot | Bootloader for over-the-air updates | Apache-2.0 |
 | OpenSCAD | Parametric enclosure | GPL-2.0 (the tool; models we make with it are ours) |
@@ -54,5 +58,5 @@ or wrong, please open an issue and we'll fix it.
 - Every claim we kept from the original plan has been rechecked. Claims that
   turned out wrong are listed in [`docs/ADVERSARIAL-REVIEW.md`](docs/ADVERSARIAL-REVIEW.md).
 
-Trademarks (Omi, XIAO, Adafruit, Pololu, Nordic, Bambu Lab, and others) belong
+Trademarks (Omi, XIAO, Adafruit, Pololu, Nordic, Infineon, Bambu Lab, and others) belong
 to their owners. This project is not affiliated with or endorsed by any of them.
