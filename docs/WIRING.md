@@ -8,7 +8,8 @@ UART is in [`SYNC-PROTOCOL.md`](SYNC-PROTOCOL.md) and is not repeated here.
 
 Parts: Seeed XIAO nRF52840 Sense, Pololu #2597 microSD breakout, a 400 mAh LiPo
 with a protection PCB (PCM), an Adafruit #805 SPDT slide switch, an Adafruit
-#5358 4-pin magnetic pogo connector, and optionally one LED with a resistor.
+#5358 4-pin magnetic pogo connector, and one recording-indicator LED with a
+resistor (required, section 5).
 
 ---
 
@@ -22,7 +23,7 @@ pinout and the Zephyr `xiao_ble` board files.
 | D0 / A0 | P0.02 | **SD CS** (active low) | #2597 `CS` | SD CS (`cs-gpios = <&gpio0 2 ...>`) | Same as DK2, so Omi firmware finds the card unmodified. |
 | D1 / A1 | P0.03 | **SD card detect** | #2597 `CD` via **1 kΩ** series | I2S SDOUT (speaker) | `CD` is shorted to GND with no card and floats with a card in. Use the internal pull-up, enabled only while sampling. Card present = HIGH. The 1 kΩ protects the pin if Omi DK2 firmware drives it as I2S while no card is inserted. |
 | D2 / A2 | P0.28 | spare | - | I2S LRCK | Keep free. It was SD CS on Omi DK1 `-spisd`. |
-| D3 / A3 | P0.29 | **Recording LED** (optional, active high) | LED anode via resistor, cathode to GND | I2S SCK | See section 5. It will flicker if you bench-test Omi DK2 firmware, which is harmless. |
+| D3 / A3 | P0.29 | **Recording LED** (required indicator, active high) | LED anode via resistor, cathode to GND | I2S SCK | See section 5. It will flicker if you bench-test Omi DK2 firmware, which is harmless. |
 | D4 / A4 | P0.04 | optional **SD power enable** (active high) | EN of a load switch, e.g. TPS22916/TPS22917 | Speaker enable, driven HIGH | It must be active **high**: Omi drives D4 high, so the card stays powered under Omi firmware too. Without a load switch, leave it unconnected. |
 | D5 / A5 | P0.05 | **Privacy switch input** | #805 common (middle) pin | Button input (rising edge) | SPDT wiring, see section 4. No pull resistor is needed, so there is zero static current. |
 | D6 | P1.11 | **UART TX** (capsule to dock) | Pogo pin 3 via **1 kΩ** | Haptic output | The default `uart0` TX in Zephyr's `xiao_ble` board. |
@@ -76,13 +77,13 @@ pinout and the Zephyr `xiao_ble` board files.
                          +------------------------------+
                          |   XIAO nRF52840 Sense (top)  |
                          |            [USB-C]           |
-  #2597 CS  <------------| D0  P0.02          5V (VBUS) |------------+-----> POGO 1 (5V)
-  #2597 CD  <--[1k]------| D1  P0.03                GND |----+-------|-----> POGO 2 (GND)
-   (spare)               | D2  P0.28                3V3 |--+ |       |
-  LED  <--[R, sec.5]-----| D3  P0.29          D10 P1.15 |--|-|-------|-----> #2597 DI  (MOSI)
-  SD-EN (opt) <----------| D4  P0.04          D9  P1.14 |--|-|-------|-----> #2597 DO  (MISO)
-  #805 COMMON  ----------| D5  P0.05          D8  P1.13 |--|-|-------|-----> #2597 SCLK
-  POGO 3 (TX) <--[1k]----| D6  P1.11          D7  P1.12 |--|-|--[1k]-+-----< POGO 4 (RX)
+  #2597 CS  <------------| D0  P0.02          5V (VBUS) |------------------> POGO 1 (5V)
+  #2597 CD  <--[1k]------| D1  P0.03                GND |----+-------------> POGO 2 (GND)
+   (spare)               | D2  P0.28                3V3 |--+ |
+  LED  <--[R, sec.5]-----| D3  P0.29          D10 P1.15 |--|-|-------------> #2597 DI  (MOSI)
+  SD-EN (opt) <----------| D4  P0.04          D9  P1.14 |--|-|-------------> #2597 DO  (MISO)
+  #805 COMMON  ----------| D5  P0.05          D8  P1.13 |--|-|-------------> #2597 SCLK
+  POGO 3 (TX) <--[1k]----| D6  P1.11          D7  P1.12 |--|-|--[1k]-------< POGO 4 (RX)
                          +------------------------------+  | |
                           underside: BAT+  BAT-  SWDIO SWCLK | |
                                       |     |              | |
@@ -97,7 +98,7 @@ pinout and the Zephyr `xiao_ble` board files.
            GND ---------------------------------------------- -+
            CD  ---- [1k] ---- D1   (CD shorts to GND only when no card)
 
-   LED (optional):  D3 --[R]--|>|-- GND        (or onboard RGB through a light pipe)
+   LED (required):  D3 --[R]--|>|-- GND        (or onboard RGB through a light pipe)
 
    Dock side of the pogo connector (NOT inside the capsule):
      5 V supply --|>|-- POGO 1        Schottky, anode at the supply, e.g. SS14/BAT54-class
@@ -183,13 +184,18 @@ If the #805 interrupted the battery (the Omi DevKit approach), then:
   for 3 s as a long press and **powers off**, so bench-test Omi firmware with
   the switch on "record".
 - **In privacy, firmware** stops PDM, **drives P1.10 LOW so the
-  microphone is unpowered**, flushes and closes the current chunk with a "privacy
-  start" marker, and keeps time, BLE sync, charging and the watchdog running. That
+  microphone is unpowered**, flushes and closes the current chunk (the next chunk carries the
+  encrypted `after_privacy` flag, SYNC-PROTOCOL.md §3), and keeps time, BLE sync, charging and the watchdog running. That
   is a stronger guarantee than a "mute" flag. It is still enforced by firmware, which
   is acceptable here because the owner writes and signs the firmware (FIRMWARE.md
-  section 9). The recording LED goes off, so the state is visible.
+  section 9). The recording LED goes off, so the state is visible. Describe it
+  as a **firmware-enforced** privacy switch, not a hardware kill.
+- **On-demand sync:** flicking privacy→record→privacy→record within 3 s opens a
+  2-minute BLE pull window for the bonded host (FIRMWARE.md §5).
 - A **true hardware mic kill** would mean cutting the onboard P1.10 trace or the PDM
-  clock on the XIAO, which is fragile and voids any rework margin. We don't do it.
+  clock on the XIAO, which is fragile and voids any rework margin. We don't do it
+  in v1. A switch that interrupts mic power in hardware (on a v2 board, or a
+  load switch in the mic supply) is the upgrade path.
 - **Long-term storage / shipping** is handled by a firmware "storage mode"
   (System OFF, wake on VBUS) sent from the PC, not by a hard switch.
 
@@ -202,7 +208,7 @@ and that time resets on every cycle.
 
 ---
 
-## 5. Recording-indicator LED (optional, recommended)
+## 5. Recording-indicator LED (required when worn)
 
 Why include one: recording conversations is regulated, and the rules differ by place.
 Many places allow a participant to record (one-party consent). Others need everyone's
@@ -225,15 +231,18 @@ Options:
    the XIAO's own resistors). No extra wiring, but the board LEDs are brighter and
    draw more, so blink them sparingly.
 
-Suggested convention: a slow red blink means recording, off means privacy, and
-the LED is off on the dock at night (configurable). Sleep-audio recording on the
-dock is a deliberate choice by the owner. If you share the bedroom, ask.
+Rule: the indicator is **required whenever the capsule records off the dock**
+(worn, or left on a table). A slow red blink means recording, off means privacy.
+On the dock it may be dimmed or turned off at night (configurable), because the
+dock is in your own bedroom. Sleep-audio recording on the dock is a deliberate
+choice by the owner. If you share the bedroom, ask. See [LEGAL](LEGAL.md).
 
 ---
 
 ## 6. Build notes
 
-- Silicone wire (#2517/#2518): 30 AWG for signals, 26 AWG for battery and 5V.
+- Silicone wire: 26 AWG (#2517 black / #2518 white, 7.6 m) for battery and 5V;
+  30 AWG (#3164 black / #3169 white, 15.2 m, 0.8 mm OD) for signals.
 - Keep SPI wires short (< 5 cm) and the same length. Even at 8 MHz, long SPI
   wires make ringing that corrupts SD transfers.
 - Add a 100 nF next to the 22 µF at the SD VDD pin.

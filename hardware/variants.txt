@@ -1,0 +1,30 @@
+# Eagle Capsule CAD variants to verify. One combination per line, as OpenSCAD -D
+# assignments (each one becomes `-D <assignment>`); `#` starts a comment.
+# Every line must render capsule.scad parts interference (empty), body, lid and bezel,
+# and dock.scad part dock, without an assertion failure. See hardware/README.md.
+
+# --- every battery x storage x board, default preset ---
+battery="400" storage="pololu_sd" board="nrf52840" preset="default"
+battery="400" storage="sd_nand" board="nrf52840" preset="default"
+battery="400" storage="pololu_sd" board="nrf54lm20a" preset="default"
+battery="400" storage="sd_nand" board="nrf54lm20a" preset="default"
+battery="600" storage="pololu_sd" board="nrf52840" preset="default"
+battery="600" storage="sd_nand" board="nrf52840" preset="default"
+battery="600" storage="pololu_sd" board="nrf54lm20a" preset="default"
+battery="600" storage="sd_nand" board="nrf54lm20a" preset="default"
+battery="1100" storage="pololu_sd" board="nrf52840" preset="default"
+battery="1100" storage="sd_nand" board="nrf52840" preset="default"
+battery="1100" storage="pololu_sd" board="nrf54lm20a" preset="default"
+battery="1100" storage="sd_nand" board="nrf54lm20a" preset="default"
+
+# --- slim preset ---
+battery="400" storage="pololu_sd" board="nrf52840" preset="slim"
+battery="400" storage="sd_nand" board="nrf52840" preset="slim"
+battery="1100" storage="pololu_sd" board="nrf52840" preset="slim"
+battery="1100" storage="sd_nand" board="nrf52840" preset="slim"
+battery="400" storage="sd_nand" board="nrf54lm20a" preset="slim"
+battery="600" storage="sd_nand" board="nrf54lm20a" preset="slim"
+
+# --- optional skin pad (changes the body and the dock seat only when true) ---
+battery="400" storage="pololu_sd" board="nrf52840" preset="default" skin_pad=true
+battery="400" storage="pololu_sd" board="nrf52840" preset="slim" skin_pad=true

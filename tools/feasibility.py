@@ -29,7 +29,7 @@ LOADS = {
     "PDM microphone (onboard, WMM7035/MSM261, ~64 dBA SNR)": (0.6, 0.8, "MEMS PDM datasheet range; mic power pin P1.10 - VERIFY on part"),
     "IMU (LSM6DS3TR-C, low-power or gated off)":            (0.1, 1.1, "Seeed forum: ~1.1 mA if the IMU is left powered - VERIFIED risk, gate it"),
     "microSD idle in SPI mode":                             (0.3, 1.0, "datasheets 0.12-0.25 mA, field 0.3-1 mA - MEASURE your card"),
-    "microSD write bursts (avg over time)":                 (0.3, 0.8, "~40 mA x ~10 ms per 4 KB block every ~2 s - ESTIMATE"),
+    "microSD write bursts (avg over time)":                 (0.3, 0.8, "~40 mA x ~10 ms per 4 KB block every ~1.4 s at 24 kbps - ESTIMATE"),
     "BLE idle connection/advertising":                      (0.1, 0.3, "Nordic online power profiler, long intervals - ESTIMATE"),
     "Regulator quiescent + VBAT divider + LED off":         (0.05, 0.2, "XIAO schematic; LEDs disabled in firmware - ESTIMATE"),
 }
@@ -47,8 +47,13 @@ SAFETY_TIMER_H = 10          # BQ25101 fixed 10 h fast-charge timer (verified)
 # ---------------------------------------------------------------- data
 OPUS_KBPS = pick(24, 32)     # 24 kbps planned (docs/FIRMWARE.md); Omi devkit ships 32 kbps VBR (verified)
 CARD_GB = 32
+SLOT_BYTES = 256 * 1024     # one chunk per raw-ring slot
+CHUNK_S = 60
 SPEECH_FRACTION = 0.35       # share of a 24 h day that is not silence (VAD) - ESTIMATE
-BLE_KBYTES_S = pick(40, 12)  # bleak on Linux ~30-100, Windows ~10-60 KB/s (estimate); chip ceiling ~165
+# BLE bulk sync. Typical 40 KB/s is an ESTIMATE (bleak on Linux ~30-100, Windows ~10-60; chip
+# ceiling ~165). Worst 5 KB/s is MEASURED: Boswell (github.com/leakydata/boswell, STANDALONE_CAPTURE.md)
+# pulled a file over GATT notifications at 5.07 kB/s on a XIAO nRF52840 Sense while still recording.
+BLE_KBYTES_S = pick(40, 5)
 UART_KBYTES_S = 90           # 1 Mbaud UART over the dock's spare pogo pins (option)
 
 # ---------------------------------------------------------------- mechanics (mm, g)
@@ -102,15 +107,23 @@ def data():
     mb_per_h = OPUS_KBPS * 1000 / 8 * 3600 / 1e6
     full_day = mb_per_h * 24
     vad_day = full_day * SPEECH_FRACTION
-    days = CARD_GB * 1000 * 0.95 / full_day
+    # The raw ring stores one 60 s chunk per fixed 256 KiB slot (docs/FIRMWARE.md section 8),
+    # so capacity counts slots, not bytes, and doesn't change with bitrate.
+    slots = CARD_GB * 1e9 * 0.95 / SLOT_BYTES
+    days = slots * CHUNK_S / 86400
     print(f"  Opus {OPUS_KBPS} kbps -> {mb_per_h:.1f} MB/h, {full_day:.0f} MB per 24 h ungated, {vad_day:.0f} MB with VAD")
-    print(f"  {CARD_GB} GB card holds ~{days:.0f} days ungated (a ring buffer, not an archive)")
+    print(f"  {CARD_GB} GB card holds ~{days:.0f} days ({slots:,.0f} slots of 256 KiB, one per {CHUNK_S} s chunk; a ring buffer, not an archive)")
     for label, mb in (("ungated", full_day), ("VAD-gated", vad_day)):
         ble = mb * 1000 / BLE_KBYTES_S / 3600
         uart = mb * 1000 / UART_KBYTES_S / 3600
         print(f"  Sync {label:9s}: BLE @{BLE_KBYTES_S} KB/s = {ble:4.1f} h | dock UART @{UART_KBYTES_S} KB/s = {uart:4.1f} h  (window {DOCK_HOURS} h)")
     ok = full_day * 1000 / BLE_KBYTES_S / 3600 < DOCK_HOURS
-    print(f"  Verdict: ungated BLE sync fits the night window: {'PASS' if ok else 'FAIL - needs VAD or the dock UART'}")
+    ok_vad = vad_day * 1000 / BLE_KBYTES_S / 3600 < DOCK_HOURS
+    uart_ok = full_day * 1000 / UART_KBYTES_S / 3600 < DOCK_HOURS
+    print(f"  Verdict: ungated BLE sync fits the night window: {'PASS' if ok else 'FAIL'}"
+          f"; VAD-gated BLE: {'PASS' if ok_vad else 'FAIL'}; dock UART: {'PASS' if uart_ok else 'FAIL'}")
+    if not ok:
+        print("  -> Build the dock UART from the start; treat BLE as the docked fallback and for on-demand pulls.")
 
 def fit():
     hr("4. Internal fit and weight")

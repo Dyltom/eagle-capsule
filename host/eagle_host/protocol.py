@@ -14,6 +14,7 @@ from enum import IntEnum
 PROTO_VERSION = 1
 MIN_FRAME = 96            # INFO is 88 bytes; BLE needs ATT_MTU >= 99 (use 247 with DLE)
 DATA_OVERHEAD = 9         # type + seq + offset
+MAX_UART_BODY = 0xFFFF + 4   # largest frame (u16 max_frame) + CRC-32
 
 
 class T(IntEnum):
@@ -99,22 +100,26 @@ def uart_encode(frame: bytes) -> bytes:
 
 
 class UartDecoder:
-    """Byte-stream -> frames. Frames with a bad CRC are counted and dropped."""
+    """Byte-stream -> frames. Frames with a bad CRC, or longer than any legal frame, are counted and dropped."""
 
     def __init__(self) -> None:
-        self.buf, self.esc, self.bad = bytearray(), False, 0
+        self.buf, self.esc, self.overflow, self.bad = bytearray(), False, False, 0
 
     def feed(self, data: bytes) -> list[bytes]:
         out = []
         for b in data:
             if b == END:
-                if len(self.buf) > 4:
+                if self.overflow:
+                    self.bad += 1
+                elif len(self.buf) > 4:
                     frame, crc = bytes(self.buf[:-4]), struct.unpack("<I", self.buf[-4:])[0]
                     if zlib.crc32(frame) == crc:
                         out.append(frame)
                     else:
                         self.bad += 1
-                self.buf, self.esc = bytearray(), False
+                self.buf, self.esc, self.overflow = bytearray(), False, False
+            elif self.overflow:
+                continue
             elif self.esc:
                 self.buf.append(END if b == ESC_END else ESC if b == ESC_ESC else b)
                 self.esc = False
@@ -122,6 +127,8 @@ class UartDecoder:
                 self.esc = True
             else:
                 self.buf.append(b)
+            if len(self.buf) > MAX_UART_BODY:
+                self.buf, self.overflow = bytearray(), True
         return out
 
 
@@ -135,12 +142,16 @@ class LoopbackTransport:
     drop_after_data: the link dies after this many DATA frames have been delivered.
     corrupt_data:    flip a byte in the Nth DATA frame (models corruption the link CRC cannot see,
                      e.g. a bad SD read on the device).
+    secure_link:     whether the client may AUTH and ACK over this link. A real transport sets it
+                     only for a bonded LE Secure Connections link or the wired dock UART. The
+                     loopback is in-process, so nothing can relay or inject; tests set False.
     """
 
     def __init__(self, device, mode: str = "ble", mtu: int = 247,
-                 drop_after_data: int | None = None, corrupt_data: int | None = None) -> None:
+                 drop_after_data: int | None = None, corrupt_data: int | None = None,
+                 secure_link: bool = True) -> None:
         assert mode in ("ble", "uart")
-        self.device, self.mode = device, mode
+        self.device, self.mode, self.secure_link = device, mode, secure_link
         self.max_frame = mtu - 3 if mode == "ble" else 1024
         self.drop_after_data, self.corrupt_data = drop_after_data, corrupt_data
         self.data_frames, self.connected = 0, True
