@@ -1,9 +1,9 @@
 # Eagle Capsule CAD variants to verify. One combination per line, as OpenSCAD -D
 # assignments (each one becomes `-D <assignment>`); `#` starts a comment.
 # Every line must render capsule.scad parts interference (empty), body, lid, bezel (the eagle
-# plate unless bezel_style="flush"), pegs, usb_plug (dust cap) and gasket, and dock.scad part
+# crest plate unless bezel_style="flush"; the wide eagle plate with bezel_style="eagle"), pegs, usb_plug (dust cap) and gasket, and dock.scad part
 # stand, without an assertion failure. See hardware/README.md.
-# Defaults: battery="600", mic="im73d122", preset="default", bezel_style="eagle".
+# Defaults: battery="600", mic="im73d122", preset="default", bezel_style="crest" (eagle crest inside the outline).
 
 # --- every battery x storage x board, default preset (IM73D122 mic board) ---
 battery="400" storage="pololu_sd" board="nrf52840" preset="default"
@@ -29,7 +29,13 @@ battery="600" storage="sd_nand" board="nrf54lm20a" preset="slim"
 battery="1100" storage="pololu_sd" board="nrf52840" preset="slim"
 battery="1100" storage="sd_nand" board="nrf54lm20a" preset="slim"
 
-# --- flush bezel instead of the eagle plate (the stand seat changes with it) ---
+# --- the wide eagle plate (wings past the pebble) instead of the crest ---
+battery="400" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="eagle"
+battery="600" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="eagle"
+battery="600" storage="sd_nand" board="nrf54lm20a" preset="slim" bezel_style="eagle"
+battery="1100" storage="sd_nand" board="nrf54lm20a" preset="default" bezel_style="eagle"
+
+# --- flush bezel instead of the crest (the stand seat changes with it) ---
 battery="400" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="flush"
 battery="400" storage="sd_nand" board="nrf54lm20a" preset="default" bezel_style="flush"
 battery="600" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="flush"

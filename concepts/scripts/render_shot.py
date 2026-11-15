@@ -24,6 +24,7 @@ FILES = {
     'lowpoly': '01-lowpoly.png', 'minimal': '02-minimal.png', 'crest': '03-crest.png',
     'exploded': '04-exploded.png', 'dock': '05-stand-nightstand.png', 'scale': '06-scale.png',
     'scale-top': '07-scale-top.png', 'cad': '08-cad.png',
+    'size': '09-size.png', 'size-top': '10-size-top.png',
 }
 
 
@@ -145,7 +146,7 @@ def cad_materials():
 
 # ------------------------------------------------------------------ CAD capsule hero
 def shot_cad():
-    """The real capsule from hardware/capsule.scad: body, lid and eagle plate (default variant)."""
+    """The real capsule from hardware/capsule.scad: body, lid and eagle crest plate (default variant)."""
     ec.cyclorama((0.60, 0.60, 0.61))
     shell, plate = cad_materials()
     objs = [import_stl('body', shell), import_stl('lid', shell), import_stl('bezel', plate, 30)]
@@ -326,6 +327,92 @@ def shot_scale(top=False):
     ec.world(strength=0.15)
 
 
+# ------------------------------------------------------------------ CAD size reference
+def rounded_slab(name, w, h, t, r, loc, mat):
+    """A w x h rectangle with corner radius r, t thick, lying flat with its base at loc.z."""
+    cu = bpy.data.curves.new(name, 'CURVE')
+    cu.dimensions = '2D'
+    cu.fill_mode = 'BOTH'
+    cu.extrude = t / 2
+    sp = cu.splines.new('POLY')
+    pts = []
+    for cx, cy, a0 in ((w / 2 - r, h / 2 - r, 0), (-w / 2 + r, h / 2 - r, 90),
+                       (-w / 2 + r, -h / 2 + r, 180), (w / 2 - r, -h / 2 + r, 270)):
+        for i in range(9):
+            a = math.radians(a0 + 90 * i / 8)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a), 0, 1))
+    sp.points.add(len(pts) - 1)
+    for pt, co in zip(sp.points, pts):
+        pt.co = co
+    sp.use_cyclic_u = True
+    o = ec.link(bpy.data.objects.new(name, cu))
+    o.location = (loc[0], loc[1], loc[2] + t / 2)
+    cu.materials.append(mat)
+    return o
+
+
+def label(text, loc, size=4.2, rot=0.0):
+    cu = bpy.data.curves.new('label', 'FONT')
+    cu.body = text
+    cu.size = size
+    cu.align_x = 'CENTER'
+    cu.extrude = 0.05
+    o = ec.link(bpy.data.objects.new('label ' + text, cu))
+    o.location = loc
+    o.rotation_euler.z = math.radians(rot)
+    cu.materials.append(ec.pmat('label ink', (0.03, 0.03, 0.035), 0.7))
+    return o
+
+
+def shot_size(top=False):
+    """The CAD capsule (crest plate) beside a bank card, an AA cell and a 25 mm coin on a 10 mm grid."""
+    ec.cyclorama((0.62, 0.62, 0.63))
+    mat_t = 1.0
+    ec.box('grid mat', (260, 170, mat_t), (-35, -18, mat_t / 2), grid_mat(), bev=0.3)
+    shell, plate = cad_materials()
+    objs = [import_stl('body', shell), import_stl('lid', shell), import_stl('bezel', plate, 30)]
+    bb = [o.matrix_world @ Vector(c) for o in objs for c in o.bound_box]
+    zmin = min(v.z for v in bb)
+    cx = (min(v.x for v in bb) + max(v.x for v in bb)) / 2
+    cy = (min(v.y for v in bb) + max(v.y for v in bb)) / 2
+    for o in objs:   # the domed back rests on the mat, centred at the origin
+        o.location = (-cx, -cy, mat_t - zmin)
+    w = max(v.x for v in bb) - min(v.x for v in bb)
+    h = max(v.y for v in bb) - min(v.y for v in bb)
+    t = max(v.z for v in bb) - zmin
+    # ISO/IEC 7810 ID-1 card: 85.6 x 53.98 x 0.76 mm, 3.18 mm corners (plain, no branding)
+    card_x = -w / 2 - 10 - 85.6 / 2
+    rounded_slab('bank card', 85.6, 53.98, 0.76, 3.18, (card_x, 0, mat_t),
+                 ec.pmat('card', (0.08, 0.20, 0.32), 0.35))
+    rounded_slab('card chip', 11.0, 8.5, 0.1, 1.2, (card_x - 26, 4, mat_t + 0.76),
+                 ec.pmat('chip', (0.70, 0.58, 0.30), 0.3, 1.0))
+    # AA cell, 50.5 x 14.5 mm, lying beside the capsule
+    r = 7.25
+    ax = w / 2 + 10 + r
+    ec.cyl('AA body', r, 49.5, (ax, 0, mat_t + r), 'Y', ec.pmat('AA wrap', (0.05, 0.12, 0.30), 0.35), seg=96)
+    ec.cyl('AA stripe', r + 0.03, 8.0, (ax, 18.0, mat_t + r), 'Y',
+           ec.pmat('AA band', (0.70, 0.70, 0.72), 0.3, 0.0), seg=96)
+    ec.cyl('AA + nub', 2.75, 1.0, (ax, 49.5 / 2 + 0.5, mat_t + r), 'Y', ec.M('steel'), seg=48)
+    # 25 mm coin the size of an Australian $1 (plain stand-in, no coin artwork)
+    al_br = ec.pmat('aluminium bronze', (0.78, 0.55, 0.22), 0.28, 1.0)
+    coin = ec.cyl('coin', 12.5, 3.0, (0, -h / 2 - 10 - 12.5, mat_t + 1.5), 'Z', al_br, seg=128)
+    field = ec.cyl('field', 11.2, 1.0, (0, -h / 2 - 10 - 12.5, mat_t + 3.2), 'Z', smooth=False)
+    ec.boolean(coin, field)
+    ec.shade(coin, 40)
+    label(f'capsule {w:.1f} x {h:.1f} x {t:.1f} mm (with loop)', (0, h / 2 + 6, mat_t + 0.01))
+    label('bank card 85.6 x 54', (card_x, -36, mat_t + 0.01))
+    label('AA 50.5 mm', (ax + 2, -36, mat_t + 0.01))
+    label('25 mm coin', (0, -h / 2 - 10 - 25 - 7, mat_t + 0.01))
+    tgt = Vector((-36, -18, 4))
+    if top:
+        ec.camera(tgt + Vector((0, 0, 600)), tgt, ortho=195)
+        bpy.context.scene.camera.rotation_mode = 'XYZ'
+        bpy.context.scene.camera.rotation_euler = (0, 0, 0)
+    else:
+        ec.camera(ec.orbit(tgt + Vector((0, 8, 0)), 262, 38, 480), tgt + Vector((0, 8, 0)), lens=85)
+    ec.studio_lights(tgt, key_az=-120)
+    ec.world(strength=0.15)
+
 
 
 SHOTS = {
@@ -335,6 +422,8 @@ SHOTS = {
     'exploded': shot_exploded,
     'dock': shot_dock,
     'cad': shot_cad,
+    'size': lambda: shot_size(False),
+    'size-top': lambda: shot_size(True),
     'scale': lambda: shot_scale(False),
     'scale-top': lambda: shot_scale(True),
 }

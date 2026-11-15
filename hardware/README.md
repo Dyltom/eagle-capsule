@@ -6,7 +6,7 @@ and every unverified one is marked `(?)`. The files check themselves:
 
 | File | What it makes |
 |---|---|
-| [`capsule.scad`](capsule.scad) | The wearable: body (skin side + walls + bail, with the USB-C slot in the side wall), lid (carries the mic port, the IM73D122 mic-board pocket and the recording-LED light pipe), the snap-on front: the **eagle plate** (default, with its 3 peg pins) or the original flush bezel, USB-C dust cap, mic gasket, optional TPU skin pad |
+| [`capsule.scad`](capsule.scad) | The wearable: body (skin side + walls + bail, with the USB-C slot in the side wall), lid (carries the mic port, the IM73D122 mic-board pocket and the recording-LED light pipe), the snap-on front: the **eagle crest** (default: a relief eagle inside the capsule outline, with 3 peg pins), the wide **eagle plate** (wings past the core) or the original flush bezel, USB-C dust cap, mic gasket, optional TPU skin pad |
 | [`dock.scad`](dock.scad) | Optional bedside **stand**, one printed part with no electronics: the capsule leans back 30° on its bottom edge, face toward the bed, and the USB-C cable can stay plugged into the side port (the stand keeps the plug and the cable's droop clear). Optional washer weight. It reads the capsule's sizes from `capsule.scad`, so the seat follows any capsule change, including every variant below. |
 | [`variants.txt`](variants.txt) | Every variant combination that must render cleanly, one per line as `-D` assignments |
 
@@ -41,7 +41,7 @@ the middle to check the seat) and `capsule` / `cable` (the posed capsule and the
 ## Variants
 
 Set these at the top of `capsule.scad` or with `-D`. With no `-D` at all you get the
-defaults: 600 mAh, microSD, XIAO nRF52840 Sense, the IM73D122 mic board and the eagle plate,
+defaults: 600 mAh, microSD, XIAO nRF52840 Sense, the IM73D122 mic board and the eagle crest,
 a core of **41.4 × 44.3 × 18.35 mm**.
 
 | Parameter | Values | What changes |
@@ -57,7 +57,8 @@ a core of **41.4 × 44.3 × 18.35 mm**.
 | | `"onboard"` | The XIAO's own PDM mic under the port (ring gasket on the nRF52840, foam pad on the nRF54LM20A), as before |
 | `preset` | `"default"` | `bezel_t = 1.6`, `back_depth = 2.6` |
 | | `"slim"` | `bezel_t = 1.0`, `back_depth = 1.6`: 1.6 mm thinner (16.75 mm). The USB-C port stays: it is the only charging and sync port in every variant |
-| `bezel_style` | `"eagle"` (default) | The snap-on front is the eagle plate: spread wings and a head that overhang the core. See [Eagle plate](#eagle-plate-the-default-front) |
+| `bezel_style` | `"crest"` (default) | The snap-on front carries an eagle in raised relief that stays inside the capsule's outline: nothing overhangs. See [Eagle crest](#eagle-crest-the-default-front) |
+| | `"eagle"` | The wide eagle plate: spread wings and a head that overhang the core (70 mm across). See [Wide eagle plate](#wide-eagle-plate-bezel_style--eagle) |
 | | `"flush"` | The original bezel, flush with the core, with the engraved low-poly emblem. Same STL as before this option existed |
 | `skin_pad` | `false` (default) / `true` | `true` cuts a 0.5 mm pocket in the domed back for the TPU skin pad (`part="skin_pad"`), and the stand seat makes room for it. `false` leaves the body exactly as before |
 
@@ -74,7 +75,7 @@ on the 5V pin (WIRING.md section 3). The body has an open **12.8 × 6.9 mm slot*
 in front of the receptacle (right wall; left with `antenna_at = "usb_end"`), sized for a normal
 cable's overmould (`usb_plug_w` × `usb_plug_h` = 12.4 × 6.5 mm (?), measure yours), so the plug
 goes in about 4 mm. The slot floor clears the battery (0.15 mm at 600 mAh) and the plug top sits
-1.6 mm under the lid rim; with the eagle plate it slides in behind the wing. `part="usb_plug"` is an
+1.6 mm under the lid rim; with the wide eagle plate it slides in behind the wing. `part="usb_plug"` is an
 optional push-in dust cap (TPU or PETG) for when it is worn.
 
 ```
@@ -113,8 +114,8 @@ a light-pipe window on the front face, right above the XIAO's onboard RGB LED, b
 - **Light pipe:** a 1.75 mm offcut of clear PETG or PC filament (`led_pipe_d`), or 2 mm acrylic rod
   with `led_pipe_d = 2`. It runs from 0.3 mm above the LED to 0.1 mm below the front face.
 - **Lid:** a guide sleeve hangs under the lid, starting above the USB-C shell so it clears it.
-- **Bezel / eagle plate:** a matching hole cut straight through, whatever the emblem (custom 2D
-  emblems passed to the flush `bezel()` get it too). On the eagle plate it sits on the chest, with
+- **Bezel / crest / eagle plate:** a matching hole cut straight through, whatever the emblem (custom 2D
+  emblems passed to the flush `bezel()` get it too). On the crest and the eagle plate it sits on the chest, with
   no relief within 0.8 mm of it, and the pipe is cut flush with the plate face.
 - **External LED instead:** an LED on D3 can be glued under the pipe in place of the onboard one.
 - **Asserts:** the window keeps `led_web` (2 mm) of plastic to the mic port. The sleeve clears
@@ -132,41 +133,45 @@ The holes don't change any outer size.
 
 ### Every combination in `variants.txt`
 
-Rendered with OpenSCAD 2021.01 on 2026-11-15: all 45 lines rendered `interference` empty, and
+Rendered with OpenSCAD 2021.01 on 2026-11-15: all 49 lines rendered `interference` empty, and
 `body`, `lid`, `bezel`, `pegs`, `usb_plug`, `gasket` and the stand with no assertion failure
-(`python3 hardware/check_cad.py`). Every line without `bezel_style` gets the eagle plate (the
-default). The core is the same with either front, and with either mic (`mic="onboard"` lines
-come out the same size).
+(`python3 hardware/check_cad.py`). Every line without `bezel_style` gets the eagle crest (the
+default). The core is the same with any front, and with either mic (`mic="onboard"` lines
+come out the same size). The crest adds 1.3 mm to the thickness over the head and stretches
+to fill the relief area, so it is a little taller and narrower on the nRF54LM20A and 1100 mAh cores.
 
-| battery | storage | board | preset | Core W × H × T (mm) | Eagle plate W × H × T (mm) | Stand, eagle (mm) | Stand, flush (mm) |
+| battery | storage | board | preset | Core W × H × T (mm) | Crest relief area (mm) | Stand, crest (mm) | Stand, flush (mm) |
 |---|---|---|---|---|---|---|---|
-| 600 | pololu_sd | nrf52840 | default | **41.4 × 44.3 × 18.35** | **70 × 53.9 × 6.0** | **61.4 × 61.6** | 61.4 × 60.0 |
-| 600 | sd_nand | nrf52840 | default | 41.4 × 44.3 × 18.35 | 70 × 53.9 × 6.0 | 61.4 × 61.6 |  |
-| 600 | pololu_sd | nrf54lm20a | default | 40.1 × 47.8 × 18.98 | 70 × 57.4 × 6.0 | 60.1 × 63.9 |  |
-| 600 | sd_nand | nrf54lm20a | default | 39.7 × 47.8 × 18.98 | 70 × 57.4 × 6.0 | 59.7 × 63.9 | 59.7 × 62.3 |
-| 400 | pololu_sd | nrf52840 | default | 37.4 × 44.7 × 18.85 | 70 × 54.3 × 6.0 | 57.4 × 62.2 | 57.4 × 60.7 |
-| 400 | sd_nand | nrf52840 | default | 37.69 × 44.7 × 18.85 | 70 × 54.3 × 6.0 | 57.7 × 62.2 |  |
-| 400 | pololu_sd | nrf54lm20a | default | 40.1 × 47.8 × 19.48 | 70 × 57.4 × 6.0 | 60.1 × 64.3 |  |
-| 400 | sd_nand | nrf54lm20a | default | 38.39 × 47.8 × 19.48 | 70 × 57.4 × 6.0 | 58.4 × 64.3 | 58.4 × 62.8 |
-| 1100 | pololu_sd | nrf52840 | default | 46.4 × 57.7 × 18.85 | 70 × 67.3 × 6.0 | 66.4 × 68.7 | 66.4 × 67.2 |
-| 1100 | sd_nand | nrf52840 | default | 46.4 × 57.7 × 18.85 | 70 × 67.3 × 6.0 | 66.4 × 68.7 |  |
-| 1100 | pololu_sd | nrf54lm20a | default | 44.7 × 57.7 × 19.48 | 70 × 67.3 × 6.0 | 64.7 × 69.3 |  |
-| 1100 | sd_nand | nrf54lm20a | default | 44.7 × 57.7 × 19.48 | 70 × 67.3 × 6.0 | 64.7 × 69.3 | 64.7 × 67.7 |
-| 600 | pololu_sd | nrf52840 | slim | 41.4 × 44.3 × 16.75 | 70 × 53.9 × 6.0 | 61.4 × 60.7 | 61.4 × 58.7 |
-| 600 | sd_nand | nrf52840 | slim | 41.4 × 44.3 × 16.75 | 70 × 53.9 × 6.0 | 61.4 × 60.7 |  |
-| 600 | pololu_sd | nrf54lm20a | slim | 40.1 × 47.8 × 17.38 | 70 × 57.4 × 6.0 | 60.1 × 63.0 |  |
-| 600 | sd_nand | nrf54lm20a | slim | 39.7 × 47.8 × 17.38 | 70 × 57.4 × 6.0 | 59.7 × 63.0 |  |
-| 400 | pololu_sd | nrf52840 | slim | 37.4 × 44.7 × 17.25 | 70 × 54.3 × 6.0 | 57.4 × 61.4 |  |
-| 400 | sd_nand | nrf54lm20a | slim | 38.39 × 47.8 × 17.88 | 70 × 57.4 × 6.0 | 58.4 × 63.5 |  |
-| 1100 | pololu_sd | nrf52840 | slim | 46.4 × 57.7 × 17.25 | 70 × 67.3 × 6.0 | 66.4 × 67.9 |  |
-| 1100 | sd_nand | nrf54lm20a | slim | 44.7 × 57.7 × 17.88 | 70 × 67.3 × 6.0 | 64.7 × 68.4 |  |
+| 600 | pololu_sd | nrf52840 | default | **41.4 × 44.3 × 18.35** | **37 × 39.9** | **61.4 × 61.2** | 61.4 × 60.0 |
+| 600 | sd_nand | nrf52840 | default | 41.4 × 44.28 × 18.35 | 37 × 39.88 | 61.4 × 61.2 |  |
+| 600 | pololu_sd | nrf54lm20a | default | 40.1 × 47.8 × 18.98 | 35.7 × 43.4 | 60.1 × 63.5 |  |
+| 600 | sd_nand | nrf54lm20a | default | 39.7 × 47.8 × 18.98 | 35.3 × 43.4 | 59.7 × 63.5 | 59.7 × 62.3 |
+| 600 | pololu_sd | nrf52840 | slim | 41.4 × 44.3 × 16.75 | 37 × 39.9 | 61.4 × 59.8 | 61.4 × 58.7 |
+| 600 | sd_nand | nrf52840 | slim | 41.4 × 44.28 × 16.75 | 37 × 39.88 | 61.4 × 59.8 |  |
+| 600 | pololu_sd | nrf54lm20a | slim | 40.1 × 47.8 × 17.38 | 35.7 × 43.4 | 60.1 × 62.1 |  |
+| 600 | sd_nand | nrf54lm20a | slim | 39.7 × 47.8 × 17.38 | 35.3 × 43.4 | 59.7 × 62.1 |  |
+| 400 | pololu_sd | nrf52840 | default | 37.4 × 44.7 × 18.85 | 33 × 40.3 | 57.4 × 61.8 | 57.4 × 60.7 |
+| 400 | sd_nand | nrf52840 | default | 37.69 × 44.7 × 18.85 | 33.29 × 40.3 | 57.7 × 61.8 |  |
+| 400 | pololu_sd | nrf54lm20a | default | 40.1 × 47.8 × 19.48 | 35.7 × 43.4 | 60.1 × 63.9 |  |
+| 400 | sd_nand | nrf54lm20a | default | 38.39 × 47.8 × 19.48 | 33.99 × 43.4 | 58.4 × 63.9 | 58.4 × 62.8 |
+| 400 | pololu_sd | nrf52840 | slim | 37.4 × 44.7 × 17.25 | 33 × 40.3 | 57.4 × 60.4 |  |
+| 400 | sd_nand | nrf54lm20a | slim | 38.39 × 47.8 × 17.88 | 33.99 × 43.4 | 58.4 × 62.5 |  |
+| 1100 | pololu_sd | nrf52840 | default | 46.4 × 57.7 × 18.85 | 42 × 53.3 | 66.4 × 68.3 | 66.4 × 67.2 |
+| 1100 | sd_nand | nrf52840 | default | 46.4 × 57.7 × 18.85 | 42 × 53.3 | 66.4 × 68.3 |  |
+| 1100 | pololu_sd | nrf54lm20a | default | 44.7 × 57.7 × 19.48 | 40.3 × 53.3 | 64.7 × 68.8 |  |
+| 1100 | sd_nand | nrf54lm20a | default | 44.7 × 57.7 × 19.48 | 40.3 × 53.3 | 64.7 × 68.8 | 64.7 × 67.7 |
+| 1100 | pololu_sd | nrf52840 | slim | 46.4 × 57.7 × 17.25 | 42 × 53.3 | 66.4 × 66.9 |  |
+| 1100 | sd_nand | nrf54lm20a | slim | 44.7 × 57.7 × 17.88 | 40.3 × 53.3 | 64.7 × 67.5 |  |
+
+The wide eagle plate (`bezel_style="eagle"`, four lines in the list) is 70 mm across on every core,
+its height is the core's plus 9.6 mm for the head, and it stands 6.0 mm off the rim; its stand is
+0.4 mm deeper than the crest's.
 
 Also in the list: `wing_span=78` on the 1100 mAh core (plate 78 × 67.3 × 6.0), the skin pad
 (capsule 18.85 mm thick with it, 17.25 in slim), `antenna_at="usb_end"` (port on the left wall)
 and `lid_fastening="snap"`; none of them changes the core size.
 
-Every core adds the 6.7 mm bail on top; with the eagle plate the head covers it, and the plate's H
-includes the head (9.6 mm above the core). What the table shows:
+Every core adds the 6.7 mm bail on top (with the wide eagle plate the head covers it). What the table shows:
 
 - **600 mAh is the smallest core that is not short of battery.** It is 4 mm wider and 0.4 mm
   shorter than 400 mAh (its cell is 29 mm across, not 25) and 0.5 mm thinner, for 50% more charge.
@@ -181,11 +186,51 @@ includes the head (9.6 mm above the core). What the table shows:
 - **No dock connector, so every core is 5 mm shorter** than before (the 400 mAh core went from
   49.7 to 44.7 mm), and the USB-C slot adds 0.25 mm of thickness over the old service tunnel.
 
-## Eagle plate (the default front)
+## Eagle crest (the default front)
+
+The snap-on front is the bezel, the same plate as the flush one, with an eagle standing up from it
+in raised relief. Nothing reaches past the capsule's outline, so the capsule keeps its pebble shape
+(41.4 × 44.3 mm by default) and is only 1.3 mm thicker over the head. The wide eagle plate below
+is still there with `bezel_style = "eagle"`, and `"flush"` brings back the plain bezel; the body and
+lid are identical with any of the three.
+
+**The design.** Original, drawn for this project: an eagle displayed (facing out, wings raised and
+spread), with the head in profile to the viewer's left, a heavy brow and a hooked beak, fingered
+wings with nine flight feathers and a row of coverts each side, scalloped breast feathers, feathered
+thighs with three curled talons each, and a five-feather fanned tail. It has no shield, crown, sceptre,
+arrows, olive branch or lettering, so it isn't any country's arms, a military badge or a brand mark.
+Keep it that way if you edit it.
+
+It is drawn on a 100 × 110 design box in [`eagle_crest.scad`](eagle_crest.scad) and stretched to fill
+the face 2.2 mm inside the outline (`crest_margin`, the front chamfer plus 1.2 mm), so it fits every
+battery and board variant without hand-tuning.
+
+| Default (600 mAh) | mm | Parameter |
+|---|---|---|
+| Relief area | **37 × 39.9** | `crest_margin` = 2.2 |
+| Relief height | 0.6–0.8 feathers, 0.9–1.05 wings and body, **1.3** head and beak | `crest_h` |
+| Side slope of each piece | 0.45 inward over its height | `crest_taper` |
+| Capsule thickness | 18.35 at the edge, **19.65** over the head (slim: 16.75 / 18.05) | |
+| Flat face around the mic port / LED window | 1.5 / 0.8 from the hole edge | `crest_port_clr` (asserted ≥ 1.5), `crest_led_clr` |
+| Engraved lines | eye, cere, gape and breast scallops, 0.35 mm wide | `crest_line` |
+| Weight | bezel with crest 3.33 cm³ ≈ **4.2 g PETG** (+ 3 pins) | |
+
+**How it goes together.** The mic port and LED window go straight through the relief (the chest by
+default, the shoulder and chest on the nRF54LM20A) with flat rings around them, so the port's
+acoustics are the same as with the flush bezel. The bezel prints relief-up, so the three pegs are
+separate pins (`part="pegs"`) pushed into sockets in its back with a drop of CA. The sockets are as
+deep as the bezel allows (1.15 mm by default; 0.55 mm in `slim`, where the glue does the holding).
+The pry notch and the stand seat work as with the flush bezel: the stand reads the relief height.
+
+**Printing.** 0.4 mm nozzle, 0.08–0.12 mm layers so the 0.6 mm feathers get several layers; the
+thinnest raised parts (talon tips, hook of the beak) are ~0.5 mm wide at the base. A 0.2 mm
+nozzle makes it crisper. Plain plastic only (see below).
+
+## Wide eagle plate (`bezel_style = "eagle"`)
 
 The capsule's core is a rounded box on purpose: it is the smallest shell around a rectangular
 battery and two rectangular boards, and the asserts above set every millimetre of it. The front
-is the part that is free to change, so the swappable snap-on front is a full eagle silhouette
+is the part that is free to change, so this snap-on front is a full eagle silhouette
 that overhangs the core: spread wings, a head on top, a waist and a fanned tail. It reads as a bird
 at a glance; the core stays exactly the size it would be with the flush bezel (41.4 × 44.3 ×
 18.35 mm by default). `bezel_style = "flush"` brings back the original flush bezel, and nothing else changes:
@@ -280,7 +325,7 @@ STAND eagle wings: lowest point 40.3 mm above the table, 22.3 mm above the base 
 
 You don't need the stand: the capsule charges and syncs on any USB-C cable, lying on a table.
 
-## Current numbers (default parameters: 600 mAh, IM73D122 mic board, eagle plate)
+## Current numbers (default parameters: 600 mAh, IM73D122 mic board, eagle crest)
 
 Rendered with OpenSCAD 2021.01 on 2026-11-15.
 
@@ -288,12 +333,12 @@ Rendered with OpenSCAD 2021.01 on 2026-11-15.
 |---|---|---|
 | Capsule outer | **41.4 W × 44.3 H × 18.35 T** | + 6.7 mm bail on top |
 | Capsule cavity | 37.4 × 40.3 × 12.95 | |
-| Eagle plate | 70 × 53.9 × 6.0 (wings 2.2 + relief) | Capsule with it: 20.15 mm thick at the body, 22.75 at the head |
-| Shell plastic | body 8.17 + lid 1.88 + eagle plate 5.72 cm³ | **≈ 20.0 g in PETG** printed near-solid |
+| Eagle crest | relief 37 × 39.9, 1.3 high | Capsule 19.65 mm thick over the head. Wide eagle plate instead: 70 × 53.9 × 6.0, capsule 22.75 at the head |
+| Shell plastic | body 8.17 + lid 1.88 + crest bezel 3.33 cm³ | **≈ 17.0 g in PETG** printed near-solid (wide eagle plate: +3.1 g) |
 | Parts | | ≈ 17.4 g ([`tools/feasibility.py`](../tools/feasibility.py)) + mic board ≈ 0.3 g |
-| **Capsule total** | | **≈ 38 g** before the cord |
-| Stand | 61.4 × 61.6 × 18 (70.1 with the capsule in it) | 69 cm³ ≈ 88 g PETG at 100% (print at 15–20% infill, ~35 g) + optional 40–60 g steel weight |
-| 1100 mAh variant | 46.4 × 57.7 × 18.85 | `battery = "1100"`; the stand grows to 66.4 × 68.7 |
+| **Capsule total** | | **≈ 35 g** before the cord (≈ 38 g with the wide eagle plate) |
+| Stand | 61.4 × 61.2 × 18 (59.9 with the capsule in it) | 69 cm³ ≈ 88 g PETG at 100% (print at 15–20% infill, ~35 g) + optional 40–60 g steel weight |
+| 1100 mAh variant | 46.4 × 57.7 × 18.85 | `battery = "1100"`; the stand grows to 66.4 × 68.3 |
 
 Fit checks the files print on every render:
 
@@ -307,7 +352,13 @@ FIT LED window: 4.40285 mm of plastic to the mic port, pipe to USB-C shell 0.575
 FIT lid screw bosses: 6.95 mm long, 0.5 mm above the battery
 ```
 
-With the eagle plate (the default) the capsule adds:
+With the eagle crest (the default) the capsule adds:
+
+```
+CREST relief 1.3 mm on the bezel face, 2.2 mm inside the outline (37 x 39.9 mm); capsule 19.65 mm thick over the head; peg sockets 1.15 mm deep
+```
+
+With the wide eagle plate (`bezel_style="eagle"`):
 
 ```
 EAGLE plate W x H x T = 70 x 53.9 x 6 mm  (wings 2.2 + 0.4..1.2 relief; capsule with the plate 22.75 mm thick at the head, 20.15 at the wings)
@@ -396,8 +447,9 @@ real print. That is BUILD-SIMULATION gate 4.
 |---|---|---|
 | Body | Rim down, curved back up (`print_plate` does this) | Tree supports only under the bail slot; the switch window and the USB-C slot bridge |
 | Lid | Outer face down | None. If the light pipe is tight in the LED sleeve, open the hole with a 2 mm drill |
-| Eagle plate (`bezel`, default) | **Back down, relief up** (`print_plate` does this). The back is flat everywhere except the cord tunnel and the three peg sockets | None. The cord tunnel is a 9.4 mm bridge; the back chamfers are 45°. 0.12–0.16 mm layers for crisp facets, 100% infill (it is 2.2 mm thick). Add a brim if the wing tips lift. Plain plastic only (see [Eagle plate](#eagle-plate-the-default-front)) |
-| Peg pins (`pegs`, eagle only) | Standing, shank down | None. 2.2 mm × 3.5 mm: print slowly (or with something taller beside them for cooling) and make a few spares |
+| Eagle crest (`bezel`, default) | **Back down, relief up** (`print_plate` does this) | None. 0.08–0.12 mm layers, 100% infill; a 0.2 mm nozzle gives crisper feathers. Plain plastic only |
+| Wide eagle plate (`bezel_style="eagle"`) | **Back down, relief up** (`print_plate` does this). The back is flat everywhere except the cord tunnel and the three peg sockets | None. The cord tunnel is a 9.4 mm bridge; the back chamfers are 45°. 0.12–0.16 mm layers for crisp facets, 100% infill (it is 2.2 mm thick). Add a brim if the wing tips lift. Plain plastic only (see [Wide eagle plate](#wide-eagle-plate-bezel_style--eagle)) |
+| Peg pins (`pegs`, crest and eagle) | Standing, shank down | None. 2.2 mm × 3.5 mm: print slowly (or with something taller beside them for cooling) and make a few spares |
 | Flush bezel (`bezel_style="flush"`) | Face down. The emblem prints on the bed side, so it comes out crisp | None. Silk PLA or PETG, plain plastic only (no metal-filled "bronze" filament: it sits over the antenna and the mic) |
 | USB-C dust cap (`usb_plug`) | Flange down | None. TPU grips best |
 | Gasket | Flat | None. With the IM73D122 board (default) it is a punch template: cut the ring from 0.5 mm closed-cell silicone sponge or PORON. With `mic="onboard"`: print in TPU 95A, or punch it from 1.5 mm closed-cell foam. With the nRF54LM20A, `gasket` is a 2 × 4 mm pad template: punch it from 1 mm closed-cell foam with a 1 mm hole, since it is too small to print well |
@@ -426,7 +478,10 @@ real print. That is BUILD-SIMULATION gate 4.
    holder, hole over the mic), foam disc into the lid's recess. Push the light pipe into the lid's LED sleeve, lid on,
    and check the pipe lines up with the RGB LED. Cut it flush after the bezel goes on (step 7).
    Two M1.6 × 8 self-tappers (or the `snap` variant).
-7. Front: **eagle plate:** push a peg pin into each of the three sockets in the plate's back,
+7. Front: **eagle crest:** push a peg pin into each of the three sockets in the bezel's back with a
+   drop of CA, let it cure, then press the pegs through the lid until they click. The cord goes
+   through the bail as with the flush bezel.
+   **Wide eagle plate:** push a peg pin into each of the three sockets in the plate's back,
    shank first, with a drop of CA or epoxy, and let it cure. Push the flat cord through the bail
    slot from the back and lay it up over the bail, then press the plate's pegs through the lid
    until they click: the cord now runs up the tunnel behind the head and out over the crown.
@@ -457,4 +512,4 @@ nRF52840 Sense; XIAO nRF54LM20A Sense KiCad and STEP files; 2.4 GHz FPC Antenna 
 **Pololu** (#2597 microSD breakout), **Adafruit** (#4899 XTSD SD NAND board file, #805 slide
 switch), **Infineon** (IM73D122 datasheet), **Core Electronics**
 (CE04375 400 mAh and CE04377 1100 mAh LiPo) and **Little Bird Electronics** (LB-00237 600 mAh LiPo). Modelled in **OpenSCAD** (GPL-2.0; the models are MIT, see
-[LICENSE](../LICENSE)). The low-poly eagle emblem and the eagle plate are original designs.
+[LICENSE](../LICENSE)). The low-poly eagle emblem, the eagle crest and the eagle plate are original designs.

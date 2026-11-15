@@ -2,16 +2,16 @@
 
 Renders for checking size and look before buying anything. Two kinds:
 
-- **From the real CAD** (05 and 08): Blender imports the STLs that
+- **From the real CAD** (05, 08, 09 and 10): Blender imports the STLs that
   [`hardware/`](../hardware/README.md) renders, so these match what you print: the
-  current default (600 mAh, IM73D122 mic board, USB-C side slot, eagle plate),
-  core 41.4 × 44.3 × 18.35 mm.
+  current default (600 mAh, IM73D122 mic board, USB-C side slot, eagle crest front),
+  41.4 × 44.3 mm, 18.35 mm thick at the edge and 19.65 over the crest.
 - **Earlier hand-built concepts** (01–04, 06, 07): a Blender model of the first
   design (400 mAh, 37.4 × 49.7 × 18.6 mm, a magnetic pogo strip on the bottom edge).
   They still show the emblem options and the rough scale, but the pogo strip is gone
   (USB-C is now the only port) and the shape has changed a little.
 
-All three eagle emblems are original designs and copy no existing logo or brand.
+All the eagle emblems (the three concepts, the CAD crest and the wide eagle plate) are original designs and copy no existing logo or brand.
 
 | | |
 |---|---|
@@ -20,9 +20,11 @@ All three eagle emblems are original designs and copy no existing logo or brand.
 | ![Crest](renders/03-crest.png) | ![Exploded](renders/04-exploded.png) |
 | **Crest.** A relief eagle with wings reaching into the bezel, dark green PETG with a brass-tone bezel. The most ornamental, and the hardest to print crisply at this size. | **Exploded.** Back shell with switch and bail, the 400 mAh pouch, the XIAO nRF52840 and microSD boards, the front shell with the mic foam well, the bezel, and the 4-pin pogo strip. |
 | ![Stand](renders/05-stand-nightstand.png) | ![Scale](renders/06-scale.png) |
-| **Stand (CAD).** The printed stand from `dock.scad` on a nightstand with the CAD capsule and eagle plate: it leans back with its face toward the bed, and the USB-C cable plugs into the capsule's side. | **Scale.** Next to an AA cell (50.5 × 14.5 mm) and a 25 mm coin the size of an Australian $1, on a 10 mm grid. |
+| **Stand (CAD).** The printed stand from `dock.scad` on a nightstand with the CAD capsule and eagle crest: it leans back with its face toward the bed, and the USB-C cable plugs into the capsule's side. | **Scale.** Next to an AA cell (50.5 × 14.5 mm) and a 25 mm coin the size of an Australian $1, on a 10 mm grid. |
 | ![Scale, top](renders/07-scale-top.png) | ![CAD](renders/08-cad.png) |
-| **Scale, top-down.** Orthographic, 10 mm grid. The capsule is about as long as an AA and a bit wider than a $1 coin. | **CAD.** The printable body, lid and eagle plate exactly as `capsule.scad` outputs them (default variant), showing the USB-C slot and the switch and LED openings. |
+| **Scale, top-down.** Orthographic, 10 mm grid. The capsule is about as long as an AA and a bit wider than a $1 coin. | **CAD.** The printable body, lid and eagle crest bezel exactly as `capsule.scad` outputs them (default variant), showing the USB-C slot and the switch opening. |
+| ![Size](renders/09-size.png) | ![Size, top](renders/10-size-top.png) |
+| **Size (CAD).** The real default capsule beside a bank card (85.6 × 54 mm), an AA cell and a 25 mm coin the size of an Australian $1, on a 10 mm grid. Half a card long, a little shorter than an AA. | **Size, top-down (CAD).** Orthographic, 10 mm grid: 41.4 × 44.3 mm (51 mm with the cord loop), 19.6 mm thick over the crest. |
 
 ## Honest take
 
@@ -35,7 +37,7 @@ All three eagle emblems are original designs and copy no existing logo or brand.
 
 ## Re-render
 
-Blender 4.2 LTS, Cycles on the CPU (no GPU needed). The `dock` (stand) and `cad`
+Blender 4.2 LTS, Cycles on the CPU (no GPU needed). The `dock` (stand), `cad` and `size`
 shots import STLs, so render those first:
 
 ```bash
@@ -46,7 +48,7 @@ done
 for p in body lid bezel; do
   openscad -D "part=\"$p\"" -o hardware/build/$p.stl hardware/capsule.scad
 done
-for s in lowpoly minimal crest exploded dock scale scale-top cad; do
+for s in lowpoly minimal crest exploded dock scale scale-top cad size size-top; do
   blender -b --factory-startup -P concepts/scripts/render_shot.py -- $s   # add --samples 24 --pct 50 for a quick preview
 done
 ```
