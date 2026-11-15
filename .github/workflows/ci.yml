@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: Host sync tests + feasibility model
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "cryptography>=41"
+      - name: Sync pipeline against the simulated device
+        working-directory: host
+        run: python -m unittest -v
+      - name: Feasibility model (typical and worst case)
+        run: |
+          python tools/feasibility.py
+          python tools/feasibility.py --worst
+
+  cad:
+    name: CAD variants compile, asserts hold, interference empty
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenSCAD
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends openscad
+      - name: Render every variant in hardware/variants.txt
+        run: python3 hardware/check_cad.py --keep hardware/build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stl
+          path: hardware/build/*.stl
+          retention-days: 14
