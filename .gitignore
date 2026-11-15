@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+*.stl
+hardware/build/
+*.pem
+demo-out/
+data/
+*.opus
+*.wav
