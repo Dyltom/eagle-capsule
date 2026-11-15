@@ -23,8 +23,10 @@
 //        the skin-side dome is below z = 0, the bezel is on top)
 //
 //  Render one part:   openscad -D 'part="body"' -o body.stl capsule.scad
-//  Parts: assembly | fit_check | body | lid | bezel | usb_plug | gasket |
+//  Parts: assembly | fit_check | body | lid | bezel | pegs | usb_plug | gasket |
 //         skin_pad | print_plate | interference | none
+//  bezel = the eagle plate (bezel_style = "eagle", default) or the flush bezel ("flush");
+//  pegs  = the eagle plate's three separate peg pins (the flush bezel has them built in)
 // =====================================================================
 
 /* [What to render] */
@@ -233,6 +235,41 @@ peg_d = 2.2;  peg_barb = 0.25;  peg_slot = 0.6;  peg_inset = 3.5;
 emblem_ridge = 0.45;     // raised line between low-poly facets
 emblem_margin = 5.0;     // emblem width = face width - 2 x margin
 
+/* [Front plate style] */
+// "eagle" = snap-on eagle plate: spread wings and a head that overhang the pebble (default)
+// "flush" = the original bezel, flush with the pebble, with the engraved low-poly emblem.
+// Only the bezel part and the dock seat change; the body, lid and electronics don't.
+bezel_style = "eagle";
+
+/* [Eagle plate - bezel_style = "eagle"] */
+// The wing is drawn in design units: u runs out from the pebble's side (u = 16 is the
+// outermost feather tip), v runs up from the pebble's top edge (mm).
+wing_span    = 70;    // overall width, wing tip to wing tip (60-80; overhang 10-20 mm a side)
+wing_drop    = 20.5;  // wing root trailing edge sits this far below the pebble's top edge
+wing_lift    = 0;     // dihedral: raises the outer wing by this much (negative = droop)
+wing_t       = 2.2;   // plate thickness: flat back on the lid, the wings overhang at this
+tip_r        = 2.0;   // radius of every outer tip and corner (doesn't snag clothing)
+wing_back_ch = 1.0;   // 45 deg chamfer on the wing and head undersides, toward the chest
+plate_ch     = 0.6;   // front edge chamfer on the wings and head
+rib_h        = 1.2;   // stiffening band along the wing's leading edge (the root's scapular is 0.75 x)
+relief_min   = 0.4;   // feather facets stand this far (min .. max) above the plate face
+relief_max   = 1.2;
+relief_port_clr = 1.5;  // no relief within this of the mic port's edge (assert >= 1.5)
+relief_led_clr  = 0.8;  // ... nor of the LED window's edge
+head_w       = 15;    // head width (it hides the bail)
+head_top     = 9.6;   // head crown above the pebble's top edge
+head_chin    = 7.5;   // beak tip below the pebble's top edge
+head_roof    = 1.5;   // plastic over the cord tunnel behind the head
+eye_d        = 0.5;   // engraved eye depth
+cord_tunnel_clr = 0.4;  // extra air around the cord in the tunnel behind the head
+waist_w      = 22;    // body width at the waist, between the wings and the tail fan
+waist_frac   = 0.42;  // waist height above the pebble's bottom edge, as a fraction of its height
+breast_rows  = 5;     // rows of breast feathers under the beak (scaled up on taller pebbles)
+breast_w     = 24;    // width of the oval patch they fill
+tail_flare   = 6;     // the tail fans out to the pebble's full width at the bottom (covers the screws)
+sw_access    = 5.0;   // the wing stays this far above the privacy switch (finger room)
+pin_sock     = 1.6;   // socket depth for the separate peg pins in the plate's back
+
 /* [Skin pad - optional, skin_pad = true, TPU 95A] */
 pad_t       = 1.0;   // pad thickness (0.8-1.2 is comfortable in TPU 95A)
 pad_recess  = 0.5;   // pocket depth in the back; the pad stands pad_t - pad_recess proud
@@ -248,6 +285,8 @@ assert(one_of(battery, ["400", "600", "1100"]), str("battery must be \"400\", \"
 assert(one_of(storage, ["pololu_sd", "sd_nand"]), str("storage must be \"pololu_sd\" or \"sd_nand\", got ", storage));
 assert(one_of(board, ["nrf52840", "nrf54lm20a"]), str("board must be \"nrf52840\" or \"nrf54lm20a\", got ", board));
 assert(one_of(preset, ["default", "slim"]), str("preset must be \"default\" or \"slim\", got ", preset));
+assert(one_of(bezel_style, ["eagle", "flush"]), str("bezel_style must be \"eagle\" or \"flush\", got ", bezel_style));
+eagle = (bezel_style == "eagle");
 
 // PRESET resolution: an explicit value (file or -D) wins, undef takes the preset's value
 function preset_pick(v, dflt, slim) = !is_undef(v) ? v : (preset == "slim" ? slim : dflt);
@@ -393,7 +432,8 @@ led_y      = bpt_y(led_e);
 led_top    = pcb_top + led_pkg[2];
 led_hole_d = led_pipe_d + 2 * tol;
 pipe_z0    = led_top + led_gap;
-pipe_z1    = z_top - led_recess;
+plate_face = eagle ? z_rim + wing_t : z_top;   // front face of the bezel / eagle plate (flat part)
+pipe_z1    = plate_face - led_recess;
 usb_shell_z1 = pcb_top + bd_usb_h;
 // the guide sleeve hangs under the lid, but only above the USB-C shell (it sits beside it)
 sleeve_z0  = max(pipe_z0, usb_shell_z1 + 0.3);
@@ -424,18 +464,118 @@ pad_sag    = dome_z(pad_margin) + dome_d;            // rim-to-centre rise the f
 // capsule frame offset (cavity centred on the origin)
 CX = -cav_x / 2;  CY = -cav_y / 2;
 
+// ---- eagle plate (capsule frame: origin at the pebble centre) ----
+yT       = OH / 2;                       // pebble top edge
+hw       = OW / 2;                       // pebble half width
+wing_over = wing_span / 2 - hw;          // how far each wing overhangs the pebble
+wk       = (wing_span / 2 - tip_r - hw) / 16;   // design u -> mm (u = 16: outermost tip centre)
+wv       = wing_drop / 20.5;                    // design v -> mm
+function wpt(p, s = 1) = [s * (hw + p[0] * wk), yT + p[1] * wv + wing_lift * p[0] / 16];
+// right wing, inner panel (convex): wing points (design units) + shoulder points (mm, at the head)
+wing_arm   = [[0, -20.5], [10, -8], [11, 0.5], [7, 3.6], [0, 2.6]];
+function wing_arm_pts(s) = concat([for (q = wing_arm) wpt(q, s)],
+    [[s * (hh - 1), yT + 0.8], [s * (hh - 1), yT - 6], [s * (hw - 3), yT - wing_drop + 1]]);
+// feathers: [base uv, base radius, tip uv, facet height at the base, at the tip]
+// 4 fingered primaries at the tip, 3 secondaries scalloping the trailing edge
+wing_feathers = [
+    [[8.0,  1.8], 2.6, [14.6,  4.6], 1.0, 0.5],
+    [[9.0,  0.0], 2.6, [16.0, -0.2], 1.0, 0.5],
+    [[8.6, -2.2], 2.6, [15.2, -5.0], 0.9, 0.45],
+    [[7.8, -4.4], 2.6, [13.4, -9.4], 0.9, 0.45],
+    [[7.2, -7.4], 2.6, [9.8, -13.0], 0.8, 0.4],
+    [[4.6, -11.0], 2.6, [6.2, -16.2], 0.8, 0.4],
+    [[1.8, -14.4], 2.6, [2.6, -19.0], 0.7, 0.4]];
+// coverts: shorter feathers laid over the inner panel (inside the silhouette); the last one is
+// the scapular along the wing root, which doubles as the root's stiffening rib
+wing_coverts = [
+    [[6.0, -1.0], 2.0, [9.8, -6.6], 0.8, 0.45],
+    [[3.4, -3.6], 2.0, [6.8, -10.0], 0.8, 0.45],
+    [[1.2, -6.6], 2.0, [3.8, -13.4], 0.7, 0.4],
+    [[4.4,  0.2], 1.8, [6.4, -3.6], 0.6, 0.4],
+    [[1.8, -1.6], 1.8, [3.0, -5.6], 0.6, 0.4],
+    [[0.2,  0.0], 2.0, [0.6, -18.2], 0.75 * rib_h, 0.5],
+    [[-2.6, -1.2], 1.8, [-1.6, -6.4], 0.6, 0.4],
+    [[-5.6, -1.6], 1.8, [-4.6, -6.0], 0.5, 0.4]];
+// leading-edge rib: a raised band from the shoulder to the wrist (centres; it tapers, see eagle_wing)
+function wing_lead(s) = [[s * (hh + 1.4), yT - 0.4], wpt([0, 1.0], s), wpt([6.8, 2.1], s), wpt([9.6, -0.4], s)];
+
+// body: an hourglass under the head (torso, waist, fanned tail), clipped to the pebble
+waist_y  = -OH / 2 + waist_frac * OH;
+torso_pts = [[-hw - 1, yT + 1], [hw + 1, yT + 1], [hw + 1, yT - wing_drop + 1],
+             [waist_w / 2, waist_y], [-waist_w / 2, waist_y], [-hw - 1, yT - wing_drop + 1]];
+tail_pts  = [[-waist_w / 2, waist_y + 3], [waist_w / 2, waist_y + 3], [hw + tail_flare, -OH / 2 - 1],
+             [-hw - tail_flare, -OH / 2 - 1]];
+
+// head: hides the bail; the cord runs up a tunnel in its back, out over the crown
+cord_pass_w = (bail_style == "flat" ? cord_w : cord_round_d) + 0.6;   // the bail slot
+cord_pass_t = (bail_style == "flat" ? cord_t : cord_round_d) + 0.6;
+slot_y1  = OH / 2 + bail_ext() - bail_wall;            // bail slot, front opening: top edge
+slot_y0  = slot_y1 - cord_pass_t;                      //                          bottom edge
+ctun_w   = cord_pass_w + 2 * cord_tunnel_clr;         // tunnel behind the head
+ctun_h   = cord_pass_t + cord_tunnel_clr;             // its height above the bail face
+ctun_y0  = slot_y0 - 0.5;                             // starts below the slot, open at the crown
+head_t   = ctun_h + head_roof;                        // head plateau above z_rim
+hh       = head_w / 2;
+head_pts = [[-0.8 * hh, yT + head_top], [0.8 * hh, yT + head_top], [hh, yT + head_top - 3.5],
+            [hh, yT + 1], [0.6 * hh, yT - 3.5], [0, yT - head_chin], [-0.6 * hh, yT - 3.5],
+            [-hh, yT + 1], [-hh, yT + head_top - 3.5]];
+head_up  = ctun_h + 0.8;                              // head edge height where it covers the tunnel
+eye_y    = yT + 2.4;
+
+// relief keep-outs around the mic port and the LED window
+port_cx  = mic_x + CX;  port_cy = mic_y + CY;
+led_cx   = led_x + CX;  led_cy  = led_y + CY;
+port_keep = max(bezel_port_d, port_d) / 2 + relief_port_clr;
+led_keep  = led_hole_d / 2 + relief_led_clr;
+
+// distance from a point to a convex polygon (0 inside)
+function seg_d(p, a, b) = let(ab = b - a, t = max(0, min(1, ((p - a) * ab) / (ab * ab)))) norm(p - (a + t * ab));
+function inside_cvx(p, pts) = let(n = len(pts), c = [for (i = [0 : n - 1])
+    let(a = pts[i], b = pts[(i + 1) % n]) (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])])
+    min(c) >= 0 || max(c) <= 0;
+function poly_d(p, pts) = inside_cvx(p, pts) ? 0
+    : min([for (i = [0 : len(pts) - 1]) seg_d(p, pts[i], pts[(i + 1) % len(pts)])]);
+function poly_in(p, pts) = inside_cvx(p, pts)   // > 0: this far inside a convex polygon
+    ? min([for (i = [0 : len(pts) - 1]) seg_d(p, pts[i], pts[(i + 1) % len(pts)])]) : -poly_d(p, pts);
+// how far a point sits inside the plate (body + inner wing panels; corners rounded off)
+function plate_in(p) = max(poly_in(p, torso_pts), poly_in(p, tail_pts),
+                           poly_in(p, wing_arm_pts(1)) - tip_r / 2, poly_in(p, wing_arm_pts(-1)) - tip_r / 2);
+port_in_plate = plate_in([port_cx, port_cy]) - max(bezel_port_d, port_d) / 2;
+led_in_plate  = plate_in([led_cx, led_cy]) - led_hole_d / 2;
+peg_in_plate  = min([for (q = peg_list) plate_in([q[0] + CX, q[1] + CY])]) - peg_d / 2;
+port_head_gap = poly_d([port_cx, port_cy], head_pts) - max(bezel_port_d, port_d) / 2;
+led_head_gap  = poly_d([led_cx, led_cy], head_pts) - led_hole_d / 2;
+
+// wing: lowest point on the switch (right) side, and the overall plate size
+wing_low_y = min(concat([wpt(wing_arm[0])[1]],
+                        [for (f = wing_feathers) wpt(f[2])[1] - tip_r]));
+sw_top_y   = sw_yc + sw_l / 2 + CY;
+plate_top  = max(yT + head_top, max([for (f = wing_feathers) wpt(f[2])[1] + tip_r]));
+plate_W    = 2 * max([for (f = wing_feathers) wpt(f[2])[0] + tip_r]);
+plate_H    = plate_top + OH / 2;
+plate_T    = head_t + 1.0;                             // head plateau + brow / beak facets
+
 // ---------------- info functions (used by dock.scad) ----------------
 function cap_OW()        = OW;
 function cap_OH()        = OH;
 function cap_zmin()      = -dome_d - (skin_pad ? pad_proud : 0);   // incl. the skin pad
-function cap_ztop()      = z_top;
+function cap_ztop()      = eagle ? z_rim + wing_t + relief_max : z_top;   // front face over the pebble
 function cap_zrim()      = z_rim;
 function cap_conn_face() = [conn_cx + CX, -OH / 2, conn_cz];   // mating-face centre
-function cap_mic()       = [mic_x + CX, mic_y + CY, z_top];
+function cap_mic()       = [mic_x + CX, mic_y + CY, plate_face];
 function cap_switch_y()  = [sw_yc - sw_l / 2 + CY, sw_yc + sw_l / 2 + CY];
 function cap_key()       = [conn_cx + key_dx + CX, 0.3 + key_h / 2];   // x, z of key slot centre
 function cap_bail_top()  = OH / 2 + bail_ext();
 function bail_ext()      = (bail_style == "flat" ? cord_t : cord_round_d) + 0.6 + 2 * bail_wall;
+function cap_eagle()     = eagle;
+// eagle plate envelope for the dock: convex pieces (plate_env_piece(i)) and the outline points
+// of the parts that overhang the pebble, at the back and front of the plate
+function cap_plate_n()   = eagle ? 2 + 2 * (1 + len(wing_feathers)) : 0;
+function cap_plate_top() = z_rim + plate_T;
+function cap_wing_pts()  = !eagle ? [] : [for (s = [-1, 1], z = [z_rim, z_rim + wing_t + relief_max],
+    p = concat(wing_arm_pts(s),
+               [for (f = wing_feathers, a = [0 : 45 : 315]) wpt(f[2], s) + tip_r * [cos(a), sin(a)]]))
+    if (abs(p[0]) > hw) [p[0], p[1], z]];
 
 // ---------------- report ----------------
 echo(str("CAPSULE battery=", battery, " storage=", storage, " board=", board, " preset=", preset,
@@ -443,6 +583,16 @@ echo(str("CAPSULE battery=", battery, " storage=", storage, " board=", board, " 
 echo(str("CAPSULE outer W x H x T = ", OW, " x ", OH, " x ", z_top + dome_d,
          " mm  (+", bail_ext(), " mm bail)"));
 echo(str("CAPSULE cavity = ", cav_x, " x ", cav_y, " x ", cav_top));
+if (eagle) {
+    echo(str("EAGLE plate W x H x T = ", plate_W, " x ", plate_H, " x ", plate_T,
+             " mm  (wings ", wing_t, " + ", relief_min, "..", relief_max, " relief; capsule with the plate ",
+             z_rim + plate_T + dome_d, " mm thick at the head, ", z_rim + wing_t + relief_max + dome_d, " at the wings)"));
+    echo(str("FIT eagle: wings overhang ", wing_over, " mm a side, ", wing_low_y - sw_top_y,
+             " mm above the switch; cord tunnel ", ctun_w, " x ", ctun_h, " under a ", head_roof,
+             " mm roof; relief to mic port ", port_keep - max(bezel_port_d, port_d) / 2,
+             " mm, port / LED / pegs inside the plate edge by ", port_in_plate, " / ", led_in_plate, " / ", peg_in_plate,
+             " mm, head to mic port ", port_head_gap, " mm, head to LED ", led_head_gap, " mm"));
+}
 if (lm) {
     echo(str("FIT FPC antenna to battery / boards = ", keep_x0 - fpc_x1, " mm, to the magnets = ",
              fpc_conn_dist, " mm (keepout ", fpc_keepout, ")"));
@@ -498,6 +648,32 @@ if (skin_pad) {
     assert(pad_floor_left >= pad_floor, str("skin pad: only ", pad_floor_left,
            " mm of shell left under the pocket; raise pad_margin or lower pad_recess"));
     assert(pad_sag <= 0.6, "skin pad: the dome is too deep for a flat-printed pad to bend into; raise pad_margin");
+}
+if (eagle) {
+    assert(wing_over >= 10 && wing_over <= 20, str("eagle wings overhang the pebble ", wing_over,
+           " mm a side (10-20 wanted): change wing_span"));
+    assert(tip_r >= 2, "eagle: outer tips must be rounded to at least 2 mm (tip_r)");
+    assert(rib_h >= relief_min && rib_h <= relief_max, "eagle: rib_h outside relief_min..relief_max");
+    for (f = concat(wing_feathers, wing_coverts))
+        assert(f[3] >= relief_min && f[3] <= relief_max && f[4] >= relief_min && f[4] <= relief_max,
+               "eagle: feather facet height outside relief_min..relief_max");
+    assert(wing_t >= 2.0 && wing_t <= 2.5, "eagle: wing_t should be 2.0-2.5 mm (self-supporting overhang)");
+    assert(relief_port_clr >= 1.5, "eagle: relief must stay >= 1.5 mm from the mic port edge");
+    assert(port_head_gap >= relief_port_clr, str("eagle: the head is only ", port_head_gap,
+           " mm from the mic port (it would shade it)"));
+    assert(led_head_gap >= relief_led_clr, "eagle: the head covers the LED window");
+    assert(port_in_plate >= 1.0 && led_in_plate >= 1.0, str("eagle: the mic port or LED window is within 1 mm of the plate edge (",
+           port_in_plate, ", ", led_in_plate, "): change waist_w / waist_frac"));
+    assert(peg_in_plate >= 1.2, str("eagle: a peg socket is only ", peg_in_plate, " mm inside the plate edge"));
+    assert(wing_low_y >= sw_top_y + sw_access, str("eagle: the wing is only ", wing_low_y - sw_top_y,
+           " mm above the privacy switch (needs sw_access): raise the wing (wing_drop)"));
+    // cord: a flat cord must still thread through the bail slot and out over the crown
+    assert(ctun_y0 <= slot_y0 - 0.4, "eagle: cord tunnel doesn't reach below the bail slot");
+    assert(ctun_w >= cord_pass_w + 0.6 && ctun_h >= cord_pass_t + 0.3, "eagle: cord tunnel too small for the cord");
+    assert(yT + head_top >= slot_y1 + 1, "eagle: the head must reach past the bail slot");
+    assert(hh - ctun_w / 2 >= 2.4, "eagle: head walls beside the cord tunnel are under ~1.2 mm after rounding");
+    assert(head_up - ctun_h >= 0.6 && head_roof - eye_d >= 1.0, "eagle: too little plastic over the cord tunnel");
+    assert(pin_sock <= wing_t - 0.6, "eagle: peg socket leaves under 0.6 mm of plate");
 }
 
 // =====================================================================
@@ -738,8 +914,14 @@ module lid() {
 }
 
 // =====================================================================
-//  Bezel (snap-on, swappable emblem)
+//  Bezel (snap-on, swappable): the eagle plate (default) or the flush bezel
 // =====================================================================
+module bezel(emblem_depth = 0.5) {
+    if (eagle) eagle_plate();
+    else if ($children > 0) flush_bezel(emblem_depth) children();
+    else flush_bezel(emblem_depth);
+}
+
 // Low-poly eagle, original design. Each facet = [engrave depth, points].
 // Coordinates in mm for a 28 mm wingspan; right wing is mirrored for the left.
 eagle_wing = [
@@ -782,7 +964,8 @@ module bezel_peg() {
     }
 }
 
-module bezel(emblem_depth = 0.5) {
+// bezel_style = "flush": the original bezel. 2D children replace the engraved eagle.
+module flush_bezel(emblem_depth = 0.5) {
     s = (OW - 2 * emblem_margin) / eagle_span;
     difference() {
         union() {
@@ -800,6 +983,149 @@ module bezel(emblem_depth = 0.5) {
         C() translate([led_x, led_y, z_rim - 1]) cylinder(d = led_hole_d, h = bezel_th + 2, $fn = 24);   // LED window
         translate([0, -OH / 2, z_rim]) cube([8, 2 * wall, 1.2], center = true);   // pry notch
     }
+}
+
+
+// ---------------------------------------------------------------------
+//  Eagle plate (bezel_style = "eagle"). Original design: a front-facing, low-poly
+//  eagle with spread, fingered wings. It covers the pebble's front, overhangs it with
+//  the wings and hides the bail behind the head. Prints back-down, relief up; the
+//  three split pegs are separate pins (part="pegs") pressed into sockets in its back.
+// ---------------------------------------------------------------------
+module rpoly(pts, r) offset(r = r) offset(delta = -r) polygon(pts);
+
+// convex plate piece: flat back on z_rim (chamfered by cb toward the chest), thickness t,
+// front chamfer cf, hulled with raised facet points [x, y, height above z_rim]
+module cplate(t, cb, cf, pts = []) hull() {
+    translate([0, 0, z_rim]) linear_extrude(0.01) offset(delta = -cb) children();
+    translate([0, 0, z_rim + cb]) linear_extrude(t - cb - cf) children();
+    translate([0, 0, z_rim + t - 0.01]) linear_extrude(0.01) offset(delta = -cf) children();
+    for (p = pts) translate([p[0], p[1], z_rim + p[2] - 0.01]) cube(0.02, center = true);
+}
+
+module wing_arm_2d(s) offset(r = tip_r) offset(delta = -tip_r) hull() polygon(wing_arm_pts(s));
+module torso_2d() intersection() { outline(); polygon(torso_pts); }
+module tail_2d()  intersection() { outline(); polygon(tail_pts); }
+module feather_2d(f, s) hull() {
+    translate(wpt(f[0], s)) circle(r = f[1], $fn = 32);
+    translate(wpt(f[2], s)) circle(r = tip_r, $fn = 32);
+}
+module head_2d() rpoly(head_pts, tip_r);
+
+module eagle_wing(s) {
+    cplate(wing_t, wing_back_ch, plate_ch) wing_arm_2d(s);
+    L = wing_lead(s);  R = [2.4, 2.2, 1.9, 1.5];   // tapers toward the wrist
+    for (i = [0 : len(L) - 2])   // ridge sits toward the leading edge, so the band slopes back
+        cplate(wing_t, wing_back_ch, plate_ch, [concat(L[i] + [0, 0.7], [wing_t + rib_h]),
+                                                concat(L[i + 1] + [0, 0.6], [wing_t + rib_h * (i == len(L) - 2 ? 0.8 : 1)])])
+            hull() for (j = [i, i + 1]) translate(L[j]) circle(r = R[j], $fn = 6);
+    for (f = concat(wing_feathers, wing_coverts)) {
+        b = wpt(f[0], s);  t = wpt(f[2], s);  d = (t - b) / norm(t - b);
+        cplate(wing_t, wing_back_ch, plate_ch, [concat(b, [wing_t + f[3]]), concat(t - 0.8 * tip_r * d, [wing_t + f[4]])])
+            feather_2d(f, s);
+    }
+}
+
+module eagle_head() {
+    plateau = [[-ctun_w / 2 - 1, ctun_y0 - 0.6], [ctun_w / 2 + 1, ctun_y0 - 0.6],
+               [ctun_w / 2 + 1, yT + head_top - 1.4], [-ctun_w / 2 - 1, yT + head_top - 1.4]];
+    hull() {   // faceted dome: low at the chin, head_t over the cord tunnel
+        cplate(wing_t, wing_back_ch, plate_ch) head_2d();
+        cplate(head_up, wing_back_ch, plate_ch) intersection() {
+            head_2d();
+            translate([-50, ctun_y0 - 1]) square([100, 50]);
+        }
+        translate([0, 0, z_rim + head_t - 0.01]) linear_extrude(0.01) polygon(plateau);
+    }
+    ht = head_t;
+    beak = [[0, yT + 3.4, ht + 1.0], [2.4, yT + 0.6, ht + 0.3], [-2.4, yT + 0.6, ht + 0.3],
+            [1.7, yT - 3.6, ht - 0.6], [-1.7, yT - 3.6, ht - 0.6], [0, yT - head_chin - 0.6, wing_t + 1.2]];
+    hull() for (p = beak, z = [p[2], wing_t]) translate([p[0], p[1], z_rim + z - 0.01]) cube(0.02, center = true);
+    for (s = [-1, 1])   // brows: a V over the eyes
+        hull() for (p = [[1.5, yT + 4.3, ht + 0.8], [6.0, yT + 5.3, ht + 0.6], [5.2, yT + 6.9, ht],
+                         [2.0, yT + 6.0, ht], [3.6, yT + 3.9, ht]], z = [p[2], ht - 1])
+            translate([s * p[0], p[1], z_rim + z - 0.01]) cube(0.02, center = true);
+}
+
+// breast feathers: staggered rows of small downward-pointing facets, and a fanned tail
+module breast_feather(c, w, h, ht) hull() {
+    translate([c[0], c[1], z_rim + wing_t - 0.3]) linear_extrude(0.3)
+        polygon([[-w / 2, 0.5], [w / 2, 0.5], [0, -h]]);
+    translate([c[0], c[1] - 0.6, z_rim + wing_t + ht - 0.01]) cube(0.02, center = true);
+}
+// rows from under the beak to the waist, inside the torso outline
+breast_n = round(breast_rows * OH / 49.7);   // more rows on the taller 1100 mAh pebble
+breast = [for (r = [0 : breast_n - 1]) let(y = yT - head_chin - 1.6 - 3.3 * r) if (y > waist_y + 3)
+    for (i = [-4 : 4]) let(x = (i + (r % 2) / 2) * 4.8,
+                           lim = y > yT - wing_drop ? hw - 1.5 : waist_w / 2 + (y - waist_y) * (hw - waist_w / 2) / (yT - wing_drop - waist_y) - 2.4)
+        if (abs(x) + 2.2 <= min(lim, breast_w / 2 * sqrt(max(0, 1 - pow((r - 1) / (breast_n - 0.5), 2)))))
+        if (norm([x - port_cx, y - 1 - port_cy]) > port_keep + 0.6 && norm([x - led_cx, y - 1 - led_cy]) > led_keep + 0.6)
+            [x, y, max(relief_min, 0.85 - 0.1 * r - 0.08 * abs(i))]];
+module eagle_breast() for (f = breast) breast_feather([f[0], f[1]], 4.4, 3.6, f[2]);
+
+tail_root = [0, waist_y + 4];
+module eagle_tail() for (a = [-34, -17, 0, 17, 34]) {
+    d  = [sin(a), -cos(a)];  n = [cos(a), sin(a)];
+    L  = (tail_root[1] + OH / 2 - 2.8) / cos(a) - (a == 0 ? 0 : 2.5);
+    hull() {
+        translate([0, 0, z_rim + wing_t - 0.3]) linear_extrude(0.3)
+            polygon([tail_root + 2.5 * d, tail_root + 0.6 * L * d + 2.6 * n, tail_root + L * d + 1.0 * n,
+                     tail_root + L * d - 1.0 * n, tail_root + 0.6 * L * d - 2.6 * n]);
+        for (p = [[0.25, 1.0], [0.9, 0.5]]) translate(concat(tail_root + p[0] * L * d, [z_rim + wing_t + p[1] - 0.01]))
+            cube(0.02, center = true);
+    }
+}
+
+module eagle_pin() union() {   // stock split peg + a shank for the socket in the plate
+    bezel_peg();
+    translate([0, 0, z_rim - 0.01]) cylinder(d = peg_d, h = pin_sock - 0.1 + 0.01, $fn = 24);
+}
+module eagle_pins() peg_positions() eagle_pin();
+
+// detail = false: just the plate over the pebble with its holes (for the interference check)
+module eagle_plate(detail = true) {
+    difference() {
+        union() {
+            cplate(wing_t, 0, plate_ch) torso_2d();
+            cplate(wing_t, 0, plate_ch) tail_2d();
+            if (detail) difference() {
+                union() {
+                    for (s = [-1, 1]) eagle_wing(s);
+                    eagle_head();
+                    eagle_breast();
+                    eagle_tail();
+                }
+                // relief keep-outs: flat plate face around the mic port and the LED window
+                for (k = [[port_cx, port_cy, port_keep], [led_cx, led_cy, led_keep]])
+                    translate([k[0], k[1], z_rim + wing_t - 0.005]) rotate(22.5)
+                        cylinder(r = k[2] / cos(22.5), h = 20, $fn = 8);
+            }
+        }
+        C() translate([mic_x, mic_y, z_rim - 1]) cylinder(d = bezel_port_d, h = wing_t + 2, $fn = 24);
+        C() translate([led_x, led_y, z_rim - 1]) cylinder(d = led_hole_d, h = wing_t + 2, $fn = 24);   // LED window
+        translate([0, -OH / 2, z_rim]) cube([8, 2 * wall, 1.2], center = true);   // pry notch
+        translate([-ctun_w / 2, ctun_y0, z_rim - 1]) cube([ctun_w, 50, ctun_h + 1]);   // cord tunnel
+        for (s = [-1, 1])   // eyes
+            translate([0, 0, z_rim + head_t - eye_d]) linear_extrude(5)
+                polygon([[s * 2.3, eye_y + 0.8], [s * 5.4, eye_y + 1.0], [s * 4.4, eye_y - 0.5]]);
+        peg_positions() {   // sockets for the peg pins
+            translate([0, 0, z_rim - 0.01]) cylinder(d = peg_d, h = pin_sock, $fn = 24);
+            translate([0, 0, z_rim - 0.01]) cylinder(d1 = peg_d + 0.6, d2 = peg_d, h = 0.3, $fn = 24);
+        }
+    }
+}
+
+// convex envelope pieces of the plate, for the dock's seat and slide path
+module plate_env_piece(i, grow = 0) {
+    nw = 1 + len(wing_feathers);
+    zt = i == 1 ? plate_T : wing_t + relief_max;
+    translate([0, 0, z_rim - grow]) linear_extrude(zt + 2 * grow) offset(r = grow)
+        if (i == 0) outline();
+        else if (i == 1) head_2d();
+        else {
+            s = (i - 2) < nw ? 1 : -1;  k = (i - 2) % nw;
+            if (k == 0) wing_arm_2d(s); else feather_2d(wing_feathers[k - 1], s);
+        }
 }
 
 // =====================================================================
@@ -865,14 +1191,20 @@ module fit_check() {
 module interference() {   // must render EMPTY
     intersection() {
         electronics();
-        union() { body(); lid(); bezel(); }
+        // eagle: the plate without its relief (the relief is all above the plate face, clear of the LED pipe)
+        union() { body(); lid(); if (eagle) { eagle_plate(false); eagle_pins(); } else bezel(); }
     }
 }
 
 module print_plate() {
     translate([0, 0, z_rim]) rotate([180, 0, 0]) body();                       // rim on the bed
     translate([OW + 8, 0, -z_lid_bot]) lid();                                   // outer face down
-    translate([2 * OW + 16, 0, z_top]) rotate([180, 0, 0]) bezel();            // face down
+    if (eagle) {                                                                // back down, relief up
+        translate([2 * OW + 16 + plate_W / 2 - OW / 2, 0, -z_rim]) eagle_plate();
+        for (i = [0 : 2]) translate([OW + 8 + 6 * i, OH / 2 + 14, z_rim + pin_sock - 0.1])
+            rotate([180, 0, 0]) eagle_pin();               // pins shank down
+    } else
+        translate([2 * OW + 16, 0, z_top]) rotate([180, 0, 0]) bezel();        // face down
     translate([0, -OH / 2 - 15, 0]) usb_plug();
     translate([25, -OH / 2 - 12, 0]) gasket();
     if (skin_pad) translate([3 * OW + 24, 0, 0]) skin_pad();   // TPU: print it on its own
@@ -882,6 +1214,7 @@ module assembly() {
     color("Tan") body();
     color("Wheat") lid();
     color("SaddleBrown") bezel();
+    if (eagle) color("Sienna") eagle_pins();
     if (skin_pad) color("DarkSlateGray") skin_pad_fitted();
     electronics();
 }
@@ -891,6 +1224,7 @@ if (part == "fit_check")    fit_check();
 if (part == "body")         body();
 if (part == "lid")          lid();
 if (part == "bezel")        bezel();
+if (part == "pegs")         for (i = [0 : 2]) translate([6 * i, 0, z_rim + pin_sock - 0.1]) rotate([180, 0, 0]) eagle_pin();
 if (part == "usb_plug")     usb_plug();
 if (part == "gasket")       gasket();
 if (part == "print_plate")  print_plate();

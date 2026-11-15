@@ -18,7 +18,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CAPSULE_PARTS = ["body", "lid", "bezel", "usb_plug", "gasket"]
+CAPSULE_PARTS = ["body", "lid", "bezel", "pegs", "usb_plug", "gasket"]
 DOCK_PARTS = ["dock", "bottom_plate"]
 FAIL_PATTERNS = ("ERROR:", "Assertion", "WARNING: Ignoring unknown", "undefined")
 

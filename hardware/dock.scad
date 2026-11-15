@@ -5,7 +5,8 @@
 //  Pulls every capsule dimension from capsule.scad, so change the capsule
 //  there and the cradle follows. The capsule stands on its connector edge,
 //  face toward the bed, leaning back `tilt` degrees, and slides in along
-//  its own long axis.
+//  its own long axis. With the eagle plate (bezel_style = "eagle") the seat also clears the
+//  plate, and the wings ride above the base.
 //
 //  Dock frame: X = across the dock, -Y = front (toward the bed), Z = up,
 //  z = 0 is the table.
@@ -90,6 +91,9 @@ p_back_top = to_dock([0, OH / 2, cap_zmin()]);
 p_face_bot = to_dock([0, -OH / 2, cap_ztop()]);
 p_back_bot = to_dock([0, -OH / 2, cap_zmin()]);
 p_mic      = to_dock(cap_mic());
+// eagle plate (bezel_style = "eagle"): the outline points of the wings where they overhang the pebble
+wing_pts   = [for (p = cap_wing_pts()) to_dock(p)];
+p_plate_top = to_dock([0, OH / 2 + 10, cap_plate_top()]);   // around the head (for the height report)
 
 y_front = min(p_face_bot[1], p_face_top[1]) - front_reach;
 y_back  = max(p_back_top[1], p_back_bot[1]) + back_t + 6;
@@ -113,7 +117,8 @@ seat_low = min([for (sx = [-1, 1], sz = [cap_zmin(), cap_ztop()])
     to_dock([sx * OW / 2, -OH / 2, sz])[2]]) - tol - seat_clr;
 
 // ---------------- report ----------------
-echo(str("DOCK footprint = ", dock_w, " x ", dock_d, " mm, height ", max(p_back_top[2], p_face_top[2]), " mm with capsule"));
+echo(str("DOCK footprint = ", dock_w, " x ", dock_d, " mm, height ",
+         max(p_back_top[2], p_face_top[2], cap_eagle() ? p_plate_top[2] : 0), " mm with capsule"));
 echo(str("DOCK mic port is ", p_mic[2] - base_h, " mm above the base top, aimed ", tilt, " deg above horizontal"));
 echo(str("DOCK connector bottom is ", dconn_bottom - plate_t, " mm above the bottom plate"));
 echo(str("DOCK seat floor ", seat_low, " mm, bay top ", bay_top, " mm, weight pocket top ", weight_top, " mm"));
@@ -123,6 +128,19 @@ assert(p_mic[2] > base_h + 3, "the base covers the mic port");
 assert(cap_switch_y()[0] > cheek_top + 1, "the cradle covers the privacy switch");
 assert(dconn_bottom > bay_top + 1, "the dock connector pocket runs into the bay");
 assert(seat_low > weight_top + 1.5, "the weight pocket runs into the seat");
+if (cap_eagle()) {
+    // the wings ride above the base and the cheeks: they must clear the dock by >= 1 mm
+    // (inside the base's width) and the table (outside it)
+    wing_low_in  = min([for (p = wing_pts) if (abs(p[0]) <= dock_w / 2 + 1) p[2]]);
+    wing_low_all = min([for (p = wing_pts) p[2]]);
+    wing_y_min   = min([for (p = cap_wing_pts()) p[1]]);
+    echo(str("DOCK eagle wings: lowest point ", wing_low_all, " mm above the table, ",
+             wing_low_in - base_h, " mm above the base top, ", wing_y_min - cheek_top, " mm past the cheeks; wing tips ",
+             max([for (p = wing_pts) abs(p[0])]) - dock_w / 2, " mm past the base sides"));
+    assert(wing_low_in >= base_h + 1, "the eagle's wings hit the dock base");
+    assert(wing_y_min >= cheek_top + 1, "the eagle's wings hit the cradle cheeks");
+    assert(wing_low_all >= 1, "the eagle's wing tips hit the table");
+}
 
 // =====================================================================
 //  Shapes
@@ -131,9 +149,16 @@ module rrect(w, h, r) offset(r = r) square([w - 2 * r, h - 2 * r], center = true
 module footprint(inset = 0) translate([0, dock_cy]) offset(delta = -inset) rrect(dock_w, dock_d, base_r);
 
 // capsule envelope + its slide-in path, grown for clearance
-module seat_cut() hull() {
-    pose() capsule_envelope(tol + seat_clr);
-    translate(ins * 80) pose() capsule_envelope(tol + seat_clr);
+// (the eagle plate's convex pieces are swept one by one, so the cut follows its outline)
+module seat_cut() {
+    hull() {
+        pose() capsule_envelope(tol + seat_clr);
+        translate(ins * 80) pose() capsule_envelope(tol + seat_clr);
+    }
+    if (cap_plate_n() > 0) for (i = [0 : cap_plate_n() - 1]) hull() {
+        pose() plate_env_piece(i, tol + seat_clr);
+        translate(ins * 80) pose() plate_env_piece(i, tol + seat_clr);
+    }
 }
 
 // backrest: a slab behind the capsule's skin side, hulled down to the base
@@ -224,7 +249,7 @@ module bottom_plate() {
     }
 }
 
-module capsule_ghost() color("SaddleBrown", 0.6) pose() capsule_envelope(0);
+module capsule_ghost() color("SaddleBrown", 0.6) pose() { capsule_envelope(0); if (cap_eagle()) bezel(); }
 
 module assembly() {
     color("DimGray") dock();
