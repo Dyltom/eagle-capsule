@@ -1,6 +1,7 @@
 # Eagle Capsule CAD variants to verify. One combination per line, as OpenSCAD -D
 # assignments (each one becomes `-D <assignment>`); `#` starts a comment.
-# Every line must render capsule.scad parts interference (empty), body, lid and bezel,
+# Every line must render capsule.scad parts interference (empty), body, lid, bezel (the eagle
+# plate unless bezel_style="flush") and pegs,
 # and dock.scad part dock, without an assertion failure. See hardware/README.md.
 
 # --- every battery x storage x board, default preset ---
@@ -28,3 +29,16 @@ battery="600" storage="sd_nand" board="nrf54lm20a" preset="slim"
 # --- optional skin pad (changes the body and the dock seat only when true) ---
 battery="400" storage="pololu_sd" board="nrf52840" preset="default" skin_pad=true
 battery="400" storage="pololu_sd" board="nrf52840" preset="slim" skin_pad=true
+
+# --- front plate: bezel_style="eagle" (the default, so every line above has it) vs "flush" ---
+battery="400" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="eagle"
+battery="400" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="flush"
+battery="400" storage="pololu_sd" board="nrf52840" preset="slim" bezel_style="eagle"
+battery="400" storage="pololu_sd" board="nrf52840" preset="slim" bezel_style="flush"
+battery="1100" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="eagle"
+battery="1100" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="flush"
+battery="400" storage="sd_nand" board="nrf54lm20a" preset="default" bezel_style="eagle"
+battery="1100" storage="sd_nand" board="nrf54lm20a" preset="slim" bezel_style="eagle"
+battery="600" storage="sd_nand" board="nrf54lm20a" preset="default" bezel_style="flush"
+# the 1100 mAh pebble is 9 mm wider; a wider span keeps the wings in proportion (15.8 mm overhang)
+battery="1100" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="eagle" wing_span=78
