@@ -6,27 +6,31 @@
 //    Seeed Studio      - XIAO nRF52840 Sense (21 x 17.8 mm); XIAO nRF54LM20A Sense
 //                        (KiCad + STEP files) and its 2.4 GHz FPC antenna A-04
 //    Pololu            - #2597 microSD breakout (20.3 x 17.8 mm)
-//    Adafruit          - #4899 XTSD 512 MB SD NAND (EagleCAD file), #5358 DIY magnetic
-//                        connector, #805 SPDT slide switch
+//    Adafruit          - #4899 XTSD 512 MB SD NAND (EagleCAD file), #805 SPDT slide switch
+//    Infineon          - IM73D122 PDM microphone (4 x 3 x 1.2 mm LLGA, bottom port)
 //    Core Electronics  - CE04375 400 mAh and CE04377 1100 mAh LiPo
 //    Little Bird       - LB-00237 600 mAh LiPo
 //  Anything marked (?) below is NOT verified. Measure it with calipers
 //  when the parts arrive and change the parameter (see hardware/README.md).
 //
-//  Variants: battery, storage, board, preset, skin_pad (see [Variants]).
+//  Variants: battery, storage, board, mic, preset, skin_pad (see [Variants]).
+//  USB-C on the side wall is the only charging and sync port, in every variant.
 //  hardware/variants.txt lists every combination that must render cleanly.
 //
 //  Coordinate system (capsule frame):
 //    X = across the front face (left/right as you look at the bezel)
-//    Y = up the front face (+Y = lanyard end, -Y = magnetic connector edge)
+//    Y = up the front face (+Y = lanyard end, -Y = bottom edge)
 //    Z = thickness, out of the front face (z = 0 is the inner floor,
 //        the skin-side dome is below z = 0, the bezel is on top)
 //
 //  Render one part:   openscad -D 'part="body"' -o body.stl capsule.scad
 //  Parts: assembly | fit_check | body | lid | bezel | pegs | usb_plug | gasket |
 //         skin_pad | print_plate | interference | none
-//  bezel = the eagle plate (bezel_style = "eagle", default) or the flush bezel ("flush");
-//  pegs  = the eagle plate's three separate peg pins (the flush bezel has them built in)
+//  bezel    = the eagle plate (bezel_style = "eagle", default) or the flush bezel ("flush");
+//  pegs     = the eagle plate's three separate peg pins (the flush bezel has them built in);
+//  usb_plug = the optional dust cap for the USB-C port;
+//  gasket   = the mic seal: a punch template for the IM73D122 board's ring (mic = "im73d122"),
+//             or the ring / foam pad on the XIAO's own mic (mic = "onboard")
 // =====================================================================
 
 /* [What to render] */
@@ -39,22 +43,26 @@ $fn      = 40;
 
 /* [Variants] */
 // Every combination listed in hardware/variants.txt renders and passes the asserts.
-// "400" = CE04375 400 mAh (~38 x 25 x 6 ?) | "600" = see [Battery] | "1100" = 51 x 34 x 6, 21 g
-battery  = "400";
+// "600" = LB-00237 600 mAh (default, see [Battery]) | "400" = CE04375 400 mAh (~38 x 25 x 6 ?)
+// "1100" = CE04377 1100 mAh, 51 x 34 x 6, 21 g
+battery  = "600";
 // "pololu_sd" = Pololu #2597 microSD breakout | "sd_nand" = Adafruit #4899 XTSD 512 MB
 storage  = "pololu_sd";
 // "nrf52840" = XIAO nRF52840 Sense (chip antenna on the board)
 // "nrf54lm20a" = XIAO nRF54LM20A Sense (external FPC antenna on an IPEX4 lead)
 board    = "nrf52840";
-// "default" | "slim" (no USB-C tunnel, thin bezel, flatter back: 15.4 mm with the defaults).
-// The preset only fills in the three parameters marked PRESET below.
+// "im73d122" = Infineon IM73D122 on a small custom board flat inside the lid (default)
+// "onboard"  = the XIAO's own PDM mic under the port (ring gasket, or foam pad on the nRF54LM20A)
+mic      = "im73d122";
+// "default" | "slim" (thin bezel, flatter back: 1.6 mm thinner; the USB-C port stays).
+// The preset only fills in the two parameters marked PRESET below.
 preset   = "default";
 // Optional TPU skin pad on the domed back (part="skin_pad"). false = body unchanged.
 skin_pad = false;
 // Which end of the XIAO the chip antenna is at (NOT confirmed yet):
 // "far_end" = opposite the USB-C (expected), "usb_end" = same end as USB-C.
 // The antenna end always goes to the plastic-only LEFT wall, overhanging the
-// battery; this flips the XIAO (and the USB-C service tunnel) to match.
+// battery; this flips the XIAO (and the USB-C port: right wall -> left wall) to match.
 antenna_at = "far_end";
 // Lid fastening: "screws" = 2x M1.6 x 8 self-tapping into bosses
 //                "snap"   = 4 bumps on the lid into a groove in the rim
@@ -63,7 +71,6 @@ lid_fastening = "screws";
 // PRESET parameters. Leave them undef and the preset decides; give one a value
 // (in the file or with -D, e.g. -D 'bezel_t=1.2') and that value wins over the preset.
 //                    default  slim
-usb_service_port = undef;   // true     false  USB-C recovery tunnel (+ plug cap) in the side wall
 bezel_t          = undef;   // 1.6      1.0    bezel thickness over the lid
 back_depth       = undef;   // 2.6      1.6    dome: shell thickness at the centre of the skin side
 
@@ -76,7 +83,6 @@ lid_t       = 1.2;
 rabbet      = 0.6;   // lid sits in a step this wide inside the rim
 front_ch    = 1.0;   // 45 deg chamfer on the front edge (prints face-down)
 headroom    = 0.4;   // gap above the tallest board part
-conn_floor  = 3.0;   // height of the connector above the inner floor
 
 /* [XIAO nRF52840 Sense - Seeed Studio, board = "nrf52840"] */
 xiao_l        = 21.0;
@@ -86,6 +92,7 @@ xiao_h        = 4.2;   // (?) total height incl. USB-C ("about 4 mm")
 usb_w         = 9.0;   // (?) USB-C receptacle width
 usb_h         = 3.2;   // (?) USB-C receptacle height
 usb_overhang  = 1.0;   // (?) receptacle sticks out past the PCB edge
+xiao_parts_h  = 1.6;   // (?) tallest part on the top face other than the USB-C (shield can, IMU)
 ant_len       = 5.0;   // (?) length of the chip-antenna zone at its end
 ant_overhang  = 6.0;   // how far the antenna end sticks out past the battery edge
 // PDM mic (WMM7035DTTJ0 / MSM261-class, ~64 dB(A) SNR), on the TOP side (?)
@@ -108,6 +115,7 @@ lm_usb_w         = 8.94;
 lm_usb_h         = 3.26;   // shell height above the board's top face (taken as sitting on it (?))
 lm_usb_overhang  = 2.44;   // past the board edge in the STEP; the KiCad User.1 layer says 1.6 (?)
 lm_usb_len       = 8.04;   // shell length (5.6 over the board + the overhang)
+lm_parts_h       = 1.2;    // (?) tallest part on the top face other than the USB-C (IPEX4 plug, mic)
 lm_mic_from_usb  = 19.43;  // MSM261DGT006 PDM mic, 4 x 2 x 1.1 mm, top port (its footprint has
 lm_mic_from_edge = 13.22;  //   no PCB sound hole), 0.5 mm from the far board edge
 lm_mic_pkg       = [2.0, 4.0, 1.16];   // X (along the board) x Y x height above the top face
@@ -120,7 +128,7 @@ ipex_plug        = [3.0, 2.0, 1.2];   // (?) mated MHF4 plug: along its cable x 
 // Datasheet: 35.2 x 8.5 mm radiator, 0.81 mm coax 50 +/- 2 mm long, IPEX4 plug, 3M adhesive.
 // The coax is soldered at the middle of one long edge. Ships with the Sense (per the wiki).
 // It sticks flat into a pocket on the LEFT (plastic-only) inner wall, feed edge DOWN, with
-// fpc_keepout of air to the battery, the boards and the magnets.
+// fpc_keepout of air to the battery and the boards.
 fpc_l        = 35.2;
 fpc_w        = 8.5;
 fpc_t        = 0.3;   // (?) not published: flex + adhesive
@@ -140,10 +148,11 @@ mpad_squeeze = 0.3;
 mpad_pocket  = 0.6;   // the pad sits this deep in the lid's holder
 mpad_wall    = 0.6;   // holder wall around the pad
 
-/* [USB-C service cable] */
-// USB-C cable plug that must fit the service tunnel (slim overmould)
-usb_plug_w    = 12.0;  // (?) overmould width
-usb_plug_h    = 6.0;   // (?) overmould thickness
+/* [USB-C port: the only charging + sync port] */
+// An open slot in the side wall, in front of the XIAO's receptacle, that takes a normal
+// cable's overmould (the plug goes ~4 mm into the case). part="usb_plug" is an optional dust cap.
+usb_plug_w    = 12.4;  // (?) overmould width: a common full-size cable; measure yours
+usb_plug_h    = 6.5;   // (?) overmould thickness
 
 /* [Storage: Pololu #2597 microSD breakout, storage = "pololu_sd"] */
 sd_l             = 20.3;
@@ -174,14 +183,7 @@ batt_gap   = 1.0;   // foam tape between battery and the boards above it
 batt_dims  = battery == "1100" ? [34, 51, 6.0]   // [across X, along Y, thick]
            : battery == "600"  ? [29, 36, 5.5]   // (?) as listed
                                : [25, 38, 6.0];  // (?) 400 mAh, incl. PCM end
-conn_gap   = 1.5;   // space between connector back and battery (PCM wires)
-
-/* [Adafruit #5358 magnetic connector - MEASURE ON ARRIVAL] */
-conn_l = 21.0;  // (?) along the bottom edge
-conn_d = 7.0;   // (?) depth into the case (mating face -> back)
-conn_h = 7.0;   // (?) height
-// keying slot in the capsule bottom (dock has the matching rib)
-key_w = 3.0; key_h = 2.0; key_d = 3.0; key_dx = 6.0;
+batt_end_gap = 1.5; // air between the battery's PCM end and the bottom wall (folded leads)
 
 /* [Adafruit #805 slide switch] */
 sw_l        = 8.6;   // (?) body length (slide direction, along Y)
@@ -193,9 +195,40 @@ sw_leg_l    = 3.0;   // trim the legs to this length
 sw_flush    = 0.3;   // actuator tip sits this far below the outer surface
 sw_pocket   = 1.2;   // finger recess depth around the actuator
 
-/* [Mic port] */
-port_d      = 1.0;   // through-hole in the lid (front face)
-port_len    = 0.8;   // length of that hole before the foam chamber
+/* [Mic port - both mics] */
+port_d       = 1.0;  // through-hole in the lid (front face), >= 1.0 mm
+bezel_port_d = 2.0;  // bigger hole in the bezel so it never shades the port
+
+/* [IM73D122 mic board - mic = "im73d122"] */
+// A custom ~8 x 6 mm board: IM73D122 (bottom port) + 1 uF 0402 on the back, a 0.8 mm sound hole
+// through the board under the mic, 4 edge pads (VDD, GND, CLK, DATA) on the -X 6 mm edge.
+// It lies flat on the inside of the lid, mic facing into the case. Stack from outside:
+// lid (port_d hole) -> compressed gasket ring -> board hole -> mic.
+// It slides into a pocket under the lid, wire edge last: two rails hold its long edges, a stop
+// wall at the closed end puts the hole on the port, and the gasket's compression holds it.
+mic_port_x   = 0;     // port across the capsule (capsule frame; 0 = centreline, the eagle's breast)
+mic_port_dy  = -3.5;  // port centre relative to the XIAO's lower edge (cavity Y): the pocket
+                      // then laps 0.5 mm over the XIAO's pad strip, clear of the LED pipe
+mpcb_l       = 8.0;   // (?) board length (X); the wires leave the -X end
+mpcb_w       = 6.0;   // (?) board width (Y)
+mpcb_t       = 0.8;   // (?) PCB thickness
+mpcb_hole    = 0.8;   // sound hole through the board, under the mic's port
+mpcb_port    = 2.5;   // (?) hole centre from the closed (+X) end, centred across the width
+mpcb_parts   = [5.0, 3.6, 1.2];  // (?) mic + 1 uF cap on the back, centred on the hole: X x Y x height
+mpcb_pads    = 1.5;   // (?) wire pads along the -X end, on the back
+mwire_d      = 0.8;   // 30 AWG silicone wire (Adafruit #3164 / #3169), 4 of them, side by side
+mgk_t        = 0.5;   // (?) gasket ring, free thickness: closed-cell silicone sponge or PORON
+mgk_squeeze  = 0.15;  // compressed to mgk_t - mgk_squeeze (asserted 0.3..0.5)
+mgk_id       = 1.5;
+mgk_od       = 4.0;
+mpk_wall     = 0.8;   // pocket wall around the board
+mpk_lip      = 0.5;   // rail lip under each long edge of the board
+mpk_lip_t    = 0.6;   // rail lip thickness
+mic_wall_max = 1.5;   // most plastic allowed at the port (lid thickness there)
+mic_clr      = 0.2;   // air between the board (pocket, parts, wires) and anything else
+
+/* [Onboard mic seal - mic = "onboard"] */
+port_len    = 0.8;   // length of the lid hole before the foam chamber
 foam_dia    = 5.0;   // foam disc diameter
 foam_t      = 2.0;   // foam disc thickness (the recess is at least this deep)
 gasket_id   = 5.0;   // (?) needs a clear ring of PCB around the mic
@@ -203,7 +236,6 @@ gasket_od   = 7.0;
 gasket_t    = 1.3;
 gasket_groove = 0.6;
 gasket_squeeze = 0.3;
-bezel_port_d = 2.0;  // bigger hole in the bezel so it never shades the port
 
 /* [Recording LED window - REQUIRED (docs/LEGAL.md, docs/WIRING.md section 5)] */
 // A light pipe from the XIAO's onboard RGB LED straight up through the lid and the bezel,
@@ -238,7 +270,7 @@ emblem_margin = 5.0;     // emblem width = face width - 2 x margin
 /* [Front plate style] */
 // "eagle" = snap-on eagle plate: spread wings and a head that overhang the pebble (default)
 // "flush" = the original bezel, flush with the pebble, with the engraved low-poly emblem.
-// Only the bezel part and the dock seat change; the body, lid and electronics don't.
+// Only the bezel part and the stand seat change; the body, lid and electronics don't.
 bezel_style = "eagle";
 
 /* [Eagle plate - bezel_style = "eagle"] */
@@ -284,13 +316,13 @@ function one_of(v, list) = len([for (x = list) if (x == v) 1]) > 0;
 assert(one_of(battery, ["400", "600", "1100"]), str("battery must be \"400\", \"600\" or \"1100\" (a quoted string), got ", battery));
 assert(one_of(storage, ["pololu_sd", "sd_nand"]), str("storage must be \"pololu_sd\" or \"sd_nand\", got ", storage));
 assert(one_of(board, ["nrf52840", "nrf54lm20a"]), str("board must be \"nrf52840\" or \"nrf54lm20a\", got ", board));
+assert(one_of(mic, ["im73d122", "onboard"]), str("mic must be \"im73d122\" or \"onboard\", got ", mic));
 assert(one_of(preset, ["default", "slim"]), str("preset must be \"default\" or \"slim\", got ", preset));
 assert(one_of(bezel_style, ["eagle", "flush"]), str("bezel_style must be \"eagle\" or \"flush\", got ", bezel_style));
 eagle = (bezel_style == "eagle");
 
 // PRESET resolution: an explicit value (file or -D) wins, undef takes the preset's value
 function preset_pick(v, dflt, slim) = !is_undef(v) ? v : (preset == "slim" ? slim : dflt);
-usb_port   = preset_pick(usb_service_port, true, false);
 bezel_th   = preset_pick(bezel_t, 1.6, 1.0);
 dome_d     = preset_pick(back_depth, 2.6, 1.6);
 
@@ -307,7 +339,11 @@ bd_usb_len = lm ? lm_usb_len : 7.3;
 bd_mic_u   = lm ? lm_mic_from_usb : mic_from_usb;
 bd_mic_e   = lm ? lm_mic_from_edge : mic_from_edge;
 bd_mic_pkg = lm ? lm_mic_pkg : mic_pkg;
-mic_seal   = lm ? "pad" : "ring";   // see [Mic port] and the LM20A block
+bd_parts_h = lm ? lm_parts_h : xiao_parts_h;
+ext_mic    = (mic == "im73d122");
+// how the port is sealed: "board" = IM73D122 board in the lid pocket; on the XIAO's own mic,
+// "ring" = gasket ring on the PCB (nRF52840), "pad" = foam pad on the mic's lid (nRF54LM20A)
+mic_seal   = ext_mic ? "board" : lm ? "pad" : "ring";
 
 // Antenna rule.
 //   nrf52840:   the chip-antenna end of the XIAO overhangs the battery by ant_overhang,
@@ -318,7 +354,7 @@ xiao_flip  = !lm && (antenna_at == "usb_end");   // the LM20A's USB-C always fac
 fpc_x1     = fpc_t - fpc_pocket;                  // FPC inner face (cavity frame x)
 keep_x0    = lm ? fpc_x1 + fpc_keepout : clr;     // nothing metal left of this (LM20A)
 batt_x0    = lm ? keep_x0 : clr + ant_overhang;
-batt_y0    = conn_d - wall + conn_gap;
+batt_y0    = batt_end_gap;
 batt_x1    = batt_x0 + batt_dims[0];
 batt_y1    = batt_y0 + batt_dims[1];
 batt_t     = batt_dims[2];
@@ -327,6 +363,12 @@ xiao_x0    = lm ? keep_x0 : clr + (xiao_flip ? bd_usb_over : 0);
 xiao_x1    = xiao_x0 + bd_l;
 usb_face_x = xiao_flip ? xiao_x0 - bd_usb_over : xiao_x1 + bd_usb_over;
 
+// lid screw bosses in the two bottom corners; they hang from the rim down to just above the
+// battery, and the storage board starts right of the left one
+screws     = (lid_fastening == "screws");
+boss_z0    = batt_t + 0.5;
+boss_keep  = boss_inset + boss_r + 0.3;
+
 // storage board: the same slot for both, the switch stays centred on it
 nand       = (storage == "sd_nand");
 stor_l     = nand ? nand_l : sd_l;
@@ -334,7 +376,8 @@ stor_w     = nand ? nand_w : sd_w;
 stor_h     = nand ? nand_h + nand_wire_h : sd_h;
 stor_pcb_t = nand ? nand_pcb_t : 1.6;
 stor_over  = nand ? 0 : sd_card_overhang;   // the microSD card sticks out LEFT; SD NAND doesn't
-sd_x0      = keep_x0 + stor_over;
+sd_card_y0 = (stor_w - sd_card_w) / 2;      // the card's lower edge, from the board's
+sd_x0      = max(keep_x0 + stor_over, screws ? boss_keep : 0);
 sd_x1      = sd_x0 + stor_l;
 sd_y0      = batt_y0;
 sd_y1      = sd_y0 + stor_w;
@@ -347,30 +390,21 @@ xiao_top   = board_z0 + bd_h;
 sd_top     = board_z0 + stor_h;
 pcb_top    = board_z0 + bd_pcb_t;
 usb_cz     = pcb_top + bd_usb_h / 2;
+usb_yc     = (xiao_y0 + xiao_y1) / 2;
 tun_w      = usb_plug_w + 2 * tol;
 tun_h      = usb_plug_h + 2 * tol;
 
+r_in       = R_out - wall;
 sw_inset   = (wall - sw_flush) - sw_act[2] + 0;   // body face sits this far outside the inner wall
 cav_x      = max(batt_x1 + clr,
                  sd_x1 + 0.5 + sw_leg_l + sw_d - sw_inset,
                  max(xiao_x1, usb_face_x) + 2);
-cav_y      = max(batt_y1, xiao_y1) + clr;
-cav_top    = max(xiao_top + headroom,
-                 sd_top + headroom,
-                 conn_floor + conn_h + tol + headroom,
-                 usb_port ? usb_cz + tun_h / 2 + 0.4 : 0);
-
-z_lid_bot  = cav_top;
-z_rim      = cav_top + lid_t;
-z_top      = z_rim + bezel_th;
-
+// the nRF54LM20A's FPC antenna needs the straight part of the left wall to be fpc_l long
+cav_y      = max(max(batt_y1, xiao_y1) + clr, lm ? fpc_l + 2 * (r_in + 0.3) : 0);
 OW    = cav_x + 2 * wall;
 OH    = cav_y + 2 * wall;
-r_in  = R_out - wall;
+CX = -cav_x / 2;  CY = -cav_y / 2;   // capsule frame offset (cavity centred on the origin)
 
-conn_cx  = cav_x / 2;               // connector centred on the bottom edge
-conn_z0  = conn_floor;
-conn_cz  = conn_z0 + conn_h / 2;
 sw_yc    = (sd_y0 + sd_y1) / 2;
 sw_z0    = batt_t + 0.6;
 sw_x1    = cav_x + sw_inset;         // actuator-side face of the switch body
@@ -379,13 +413,71 @@ sw_x0    = sw_x1 - sw_d;
 // board coordinates -> cavity frame (u from the USB-C end, e from the bottom-facing edge)
 function bpt_x(u) = xiao_flip ? xiao_x0 + u : xiao_x1 - u;
 function bpt_y(e) = xiao_flip ? xiao_y1 - e : xiao_y0 + e;
-mic_x    = bpt_x(bd_mic_u);
-mic_y    = bpt_y(bd_mic_e);
+onb_x    = bpt_x(bd_mic_u);          // the XIAO's own mic
+onb_y    = bpt_y(bd_mic_e);
 mic_top  = pcb_top + bd_mic_pkg[2];
 usb_inner = bd_usb_len - bd_usb_over;   // receptacle length over the PCB
-// lid mic boss. "ring": a cylinder down to the TPU ring on the PCB around the mic.
-// "pad": a narrow holder down onto a foam pad on the mic's lid, widening into the foam
-// chamber only above the IPEX4 plug.
+ux0      = xiao_flip ? xiao_x0 - bd_usb_over : xiao_x1 - bd_usb_len + bd_usb_over;   // USB-C shell
+usb_shell_z1 = pcb_top + bd_usb_h;
+
+// the mic port (cavity frame): over the XIAO's mic, or where the IM73D122 board goes
+mic_x    = ext_mic ? mic_port_x - CX : onb_x;
+mic_y    = ext_mic ? xiao_y0 + mic_port_dy : onb_y;
+
+// ---- IM73D122 board (cavity frame). Depths are below the lid's inner face. ----
+mgk_c    = mgk_t - mgk_squeeze;                 // compressed gasket
+mb_x0    = mic_x + mpcb_port - mpcb_l;          // wire end (-X), open end of the pocket
+mb_x1    = mic_x + mpcb_port;                   // closed end, against the stop wall
+mb_y0    = mic_y - mpcb_w / 2;
+mb_y1    = mic_y + mpcb_w / 2;
+mwire_w  = 4 * mwire_d + 3 * 0.2;
+// [name, plan lo, plan hi, depth of its lowest point below the lid, depth of its top]
+mic_pieces = [
+    ["mic pocket", [mb_x0 + 0.5, mb_y0 - tol - mpk_wall], [mb_x1 + tol + mpk_wall, mb_y1 + tol + mpk_wall],
+                   mgk_c + mpcb_t + mpk_lip_t, 0],
+    ["mic board",  [mb_x0, mb_y0], [mb_x1, mb_y1], mgk_c + mpcb_t, mgk_c],
+    ["mic + cap",  [mic_x - mpcb_parts[0] / 2, mic_y - mpcb_parts[1] / 2],
+                   [mic_x + mpcb_parts[0] / 2, mic_y + mpcb_parts[1] / 2], mgk_c + mpcb_t + mpcb_parts[2], mgk_c + mpcb_t],
+    ["mic wires",  [mb_x0 - 3, mic_y - mwire_w / 2], [mb_x0 + mpcb_pads, mic_y + mwire_w / 2],
+                   mgk_c + mpcb_t + mwire_d, mgk_c + mpcb_t]];
+mic_depth = max([for (p = mic_pieces) p[3]]);
+
+// what sits under the lid, as boxes [name, lo, hi] (cavity frame); the board must clear them
+function box3(n, lo, hi) = [n, lo, hi];
+low_obstacles = concat(
+    [box3("battery", [batt_x0, batt_y0, 0], [batt_x1, batt_y1, batt_t]),
+     box3("XIAO", [xiao_x0, xiao_y0, board_z0], [xiao_x1, xiao_y1, pcb_top + bd_parts_h]),
+     box3("USB-C shell", [ux0, usb_yc - bd_usb_w / 2, pcb_top], [ux0 + bd_usb_len, usb_yc + bd_usb_w / 2, usb_shell_z1]),
+     box3("USB-C plug", [xiao_flip ? -wall : usb_face_x, usb_yc - tun_w / 2, usb_cz - tun_h / 2],
+                        [xiao_flip ? usb_face_x : cav_x + wall, usb_yc + tun_w / 2, usb_cz + tun_h / 2]),
+     box3("storage board", [sd_x0, sd_y0, board_z0], [sd_x1, sd_y1, board_z0 + stor_pcb_t]),
+     box3("switch", [sw_x0 - sw_leg_l, sw_yc - sw_l / 2 - tol - 1, sw_z0 - 0.5], [cav_x, sw_yc + sw_l / 2 + tol + 1, sw_z0 + sw_w])],
+    nand ? [box3("SD NAND parts", [sd_x0 + 1, sd_y0 + 1, board_z0], [sd_x1 - 1, sd_y1 - 4, board_z0 + nand_h]),
+            box3("SD NAND header wires", [sd_x0 + 1.5, sd_y1 - 3.6, board_z0], [sd_x1 - 1.5, sd_y1 - 1.4, sd_top])]
+         : [box3("microSD card", [sd_x0 - sd_card_overhang, sd_y0 + sd_card_y0, board_z0],
+                 [sd_x0 + 15 - sd_card_overhang, sd_y0 + sd_card_y0 + sd_card_w, sd_top])],
+    lm ? [box3("coax coil + plug", [xiao_x0 - coax_d - 0.6, xiao_y0 + coil_at[1] - coil_r, pcb_top],
+               [xiao_x0 + coil_at[0] + coil_r + 2, xiao_y0 + coil_at[1] + coil_r, pcb_top + coil_lift + 2.5 * coax_d])] : []);
+// keep the board's copper off the antenna: the chip-antenna end (nRF52840), the FPC keepout (nRF54LM20A)
+zone_obstacles = lm ? [box3("FPC antenna keepout", [-wall, 0, -10], [fpc_t - fpc_pocket + fpc_keepout, 100, 100])]
+                    : [box3("chip antenna zone", [xiao_x0 - 10, xiao_y0, -10], [xiao_x0 + ant_len, xiao_y1, 100])];
+function plan_gap(a0, a1, b0, b1) = max(b0[0] - a1[0], a0[0] - b1[0], b0[1] - a1[1], a0[1] - b1[1]);
+function box_gap(a0, a1, b0, b1) = max(plan_gap(a0, a1, b0, b1), b0[2] - a1[2], a0[2] - b1[2]);
+// the cavity is deep enough for the board stack over whatever sits under it
+mic_need_top = max(concat([0], [for (p = mic_pieces, o = low_obstacles)
+                   if (plan_gap(p[1], p[2], o[1], o[2]) < mic_clr) o[2][2] + mic_clr + p[3]]));
+
+cav_top    = max(xiao_top + headroom,
+                 sd_top + headroom,
+                 usb_cz + tun_h / 2 + 0.4,                 // the USB-C port (every variant)
+                 ext_mic ? mic_need_top : 0);
+
+z_lid_bot  = cav_top;
+z_rim      = cav_top + lid_t;
+z_top      = z_rim + bezel_th;
+// mic = "onboard": lid mic boss. "ring": a cylinder down to the TPU ring on the PCB around
+// the mic. "pad": a narrow holder down onto a foam pad on the mic's lid, widening into the
+// foam chamber only above the IPEX4 plug.
 mhold      = [bd_mic_pkg[0] + 2 * (tol + mpad_wall), bd_mic_pkg[1] + 2 * (tol + mpad_wall)];
 boss_bot   = mic_seal == "ring" ? pcb_top + gasket_t - gasket_groove - gasket_squeeze
                                 : mic_top + mpad_t - mpad_squeeze - mpad_pocket;
@@ -421,8 +513,6 @@ function plen(p, i = 0) = i >= len(p) - 1 ? 0 : norm(p[i + 1] - p[i]) + plen(p, 
 coax_fixed = plen(coax_path) + (coil_cx - coil_r - ipex_x) + 2;   // + plug / tab allowances
 coax_spare = coax_len - coax_fixed;
 coil_turns = coax_spare / (2 * PI * coil_r);
-// nearest metal to the FPC face: the battery / boards (keep_x0) and the magnetic connector
-fpc_conn_dist = norm([conn_cx - conn_l / 2 - fpc_x1, max(0, fpc_y0 - (conn_d - wall))]);
 
 // recording LED light pipe (cavity frame)
 led_u      = lm ? lm_led_from_usb : led_from_usb;
@@ -434,13 +524,12 @@ led_hole_d = led_pipe_d + 2 * tol;
 pipe_z0    = led_top + led_gap;
 plate_face = eagle ? z_rim + wing_t : z_top;   // front face of the bezel / eagle plate (flat part)
 pipe_z1    = plate_face - led_recess;
-usb_shell_z1 = pcb_top + bd_usb_h;
 // the guide sleeve hangs under the lid, but only above the USB-C shell (it sits beside it)
 sleeve_z0  = max(pipe_z0, usb_shell_z1 + 0.3);
 sleeve_d   = led_hole_d + 2 * led_sleeve_w;
 // clearances the asserts check
 led_mic_web   = norm([led_x - mic_x, led_y - mic_y]) - (led_hole_d + max(bezel_port_d, port_d)) / 2;
-led_boss_gap  = norm([led_x - mic_x, led_y - mic_y]) - sleeve_d / 2
+led_boss_gap  = norm([led_x - mic_x, led_y - mic_y]) - sleeve_d / 2   // mic = "onboard" only
                 - (mic_seal == "ring" ? mic_boss_d / 2 : norm([mhold[0], mhold[1]]) / 2);
 led_usb_gap   = abs(led_e - bd_w / 2) - bd_usb_w / 2 - led_pipe_d / 2;   // pipe beside the USB-C shell
 led_on_board  = led_u > led_pipe_d / 2 && led_u < bd_l - led_pipe_d / 2 && led_e > led_pipe_d / 2 && led_e < bd_w - led_pipe_d / 2;
@@ -455,14 +544,28 @@ function dist_to_pts(p, pts) = min([for (q = pts) norm([p[0] - q[0], p[1] - q[1]
 led_peg_gap   = dist_to_pts([led_x, led_y], peg_list) - (peg_d + 2 * tol) / 2 - sleeve_d / 2;
 led_coil_gap  = norm([led_x - coil_cx, led_y - coil_cy]) - (coil_r + cr) - sleeve_d / 2;
 
+// IM73D122 board: every piece against everything under (and hanging from) the lid
+peg_hole_r    = peg_d / 2 + tol;
+high_obstacles = concat(
+    [box3("LED light-pipe sleeve", [led_x - sleeve_d / 2, led_y - sleeve_d / 2, sleeve_z0],
+                                   [led_x + sleeve_d / 2, led_y + sleeve_d / 2, z_rim])],
+    screws ? [for (p = [[boss_inset, boss_inset], [cav_x - boss_inset, boss_inset]])
+              box3("lid screw boss", [p[0] - boss_r, p[1] - boss_r, boss_z0], [p[0] + boss_r, p[1] + boss_r, z_rim])] : [],
+    [for (p = peg_list) box3("bezel peg", [p[0] - peg_hole_r - 0.4, p[1] - peg_hole_r - 0.4, z_lid_bot - 0.8 - 0.1],
+                                          [p[0] + peg_hole_r + 0.4, p[1] + peg_hole_r + 0.4, z_rim])]);
+mic_boxes = [for (p = mic_pieces) [p[0], concat(p[1], [z_lid_bot - p[3]]), concat(p[2], [z_lid_bot - p[4]])]];
+mic_gaps  = [for (m = mic_boxes, o = concat(low_obstacles, high_obstacles, zone_obstacles))
+             [str(m[0], " to ", o[0]), box_gap(m[1], m[2], o[1], o[2])]];
+mic_gap_min = min([for (g = mic_gaps) g[1]]);
+mic_tightest = [for (g = mic_gaps) if (g[1] == mic_gap_min) g[0]][0];
+mic_lid_port = lid_t;                    // plastic the sound passes through in the lid
+mgk_on_board = min(mb_x1 - mic_x, mic_x - mb_x0, mic_y - mb_y0, mb_y1 - mic_y) - mgk_od / 2;
+
 // skin pad: dome height at the pocket edge, and how far the flat-printed pad must bend
 function dome_z(inset) = inset >= back_inset ? -dome_d : -dome_d * sin(acos(1 - inset / back_inset));
 pad_proud  = pad_t - pad_recess;
 pad_floor_left = -dome_z(pad_margin) - pad_recess;   // thinnest shell under the pocket
 pad_sag    = dome_z(pad_margin) + dome_d;            // rim-to-centre rise the flat pad bends through
-
-// capsule frame offset (cavity centred on the origin)
-CX = -cav_x / 2;  CY = -cav_y / 2;
 
 // ---- eagle plate (capsule frame: origin at the pebble centre) ----
 yT       = OH / 2;                       // pebble top edge
@@ -505,6 +608,8 @@ torso_pts = [[-hw - 1, yT + 1], [hw + 1, yT + 1], [hw + 1, yT - wing_drop + 1],
              [waist_w / 2, waist_y], [-waist_w / 2, waist_y], [-hw - 1, yT - wing_drop + 1]];
 tail_pts  = [[-waist_w / 2, waist_y + 3], [waist_w / 2, waist_y + 3], [hw + tail_flare, -OH / 2 - 1],
              [-hw - tail_flare, -OH / 2 - 1]];
+// a band down the middle that lies inside torso + tail together (for the plate-edge asserts only)
+spine_pts = [[-waist_w / 2, -OH / 2], [waist_w / 2, -OH / 2], [waist_w / 2, yT], [-waist_w / 2, yT]];
 
 // head: hides the bail; the cord runs up a tunnel in its back, out over the crown
 cord_pass_w = (bail_style == "flat" ? cord_w : cord_round_d) + 0.6;   // the bail slot
@@ -538,7 +643,7 @@ function poly_d(p, pts) = inside_cvx(p, pts) ? 0
 function poly_in(p, pts) = inside_cvx(p, pts)   // > 0: this far inside a convex polygon
     ? min([for (i = [0 : len(pts) - 1]) seg_d(p, pts[i], pts[(i + 1) % len(pts)])]) : -poly_d(p, pts);
 // how far a point sits inside the plate (body + inner wing panels; corners rounded off)
-function plate_in(p) = max(poly_in(p, torso_pts), poly_in(p, tail_pts),
+function plate_in(p) = max(poly_in(p, torso_pts), poly_in(p, tail_pts), poly_in(p, spine_pts),
                            poly_in(p, wing_arm_pts(1)) - tip_r / 2, poly_in(p, wing_arm_pts(-1)) - tip_r / 2);
 port_in_plate = plate_in([port_cx, port_cy]) - max(bezel_port_d, port_d) / 2;
 led_in_plate  = plate_in([led_cx, led_cy]) - led_hole_d / 2;
@@ -555,20 +660,23 @@ plate_W    = 2 * max([for (f = wing_feathers) wpt(f[2])[0] + tip_r]);
 plate_H    = plate_top + OH / 2;
 plate_T    = head_t + 1.0;                             // head plateau + brow / beak facets
 
-// ---------------- info functions (used by dock.scad) ----------------
+// ---------------- info functions (used by dock.scad, the stand) ----------------
 function cap_OW()        = OW;
 function cap_OH()        = OH;
 function cap_zmin()      = -dome_d - (skin_pad ? pad_proud : 0);   // incl. the skin pad
 function cap_ztop()      = eagle ? z_rim + wing_t + relief_max : z_top;   // front face over the pebble
 function cap_zrim()      = z_rim;
-function cap_conn_face() = [conn_cx + CX, -OH / 2, conn_cz];   // mating-face centre
 function cap_mic()       = [mic_x + CX, mic_y + CY, plate_face];
 function cap_switch_y()  = [sw_yc - sw_l / 2 + CY, sw_yc + sw_l / 2 + CY];
-function cap_key()       = [conn_cx + key_dx + CX, 0.3 + key_h / 2];   // x, z of key slot centre
+function cap_switch()    = [OW / 2, sw_yc + CY, sw_z0 + sw_w / 2];   // actuator, on the right wall
+// USB-C port: centre of the slot on the outer side wall, and which wall (+1 right, -1 left)
+function cap_usb()       = [(xiao_flip ? -1 : 1) * OW / 2, usb_yc + CY, usb_cz];
+function cap_usb_side()  = xiao_flip ? -1 : 1;
+function cap_usb_plug()  = [usb_plug_w, usb_plug_h];   // cable overmould: across (Y) x thick (Z)
 function cap_bail_top()  = OH / 2 + bail_ext();
 function bail_ext()      = (bail_style == "flat" ? cord_t : cord_round_d) + 0.6 + 2 * bail_wall;
 function cap_eagle()     = eagle;
-// eagle plate envelope for the dock: convex pieces (plate_env_piece(i)) and the outline points
+// eagle plate envelope for the stand: convex pieces (plate_env_piece(i)) and the outline points
 // of the parts that overhang the pebble, at the back and front of the plate
 function cap_plate_n()   = eagle ? 2 + 2 * (1 + len(wing_feathers)) : 0;
 function cap_plate_top() = z_rim + plate_T;
@@ -578,7 +686,7 @@ function cap_wing_pts()  = !eagle ? [] : [for (s = [-1, 1], z = [z_rim, z_rim + 
     if (abs(p[0]) > hw) [p[0], p[1], z]];
 
 // ---------------- report ----------------
-echo(str("CAPSULE battery=", battery, " storage=", storage, " board=", board, " preset=", preset,
+echo(str("CAPSULE battery=", battery, " storage=", storage, " board=", board, " mic=", mic, " preset=", preset,
          lm ? "" : str(" antenna_at=", antenna_at)));
 echo(str("CAPSULE outer W x H x T = ", OW, " x ", OH, " x ", z_top + dome_d,
          " mm  (+", bail_ext(), " mm bail)"));
@@ -594,29 +702,37 @@ if (eagle) {
              " mm, head to mic port ", port_head_gap, " mm, head to LED ", led_head_gap, " mm"));
 }
 if (lm) {
-    echo(str("FIT FPC antenna to battery / boards = ", keep_x0 - fpc_x1, " mm, to the magnets = ",
-             fpc_conn_dist, " mm (keepout ", fpc_keepout, ")"));
+    echo(str("FIT FPC antenna to battery / boards = ", keep_x0 - fpc_x1, " mm (keepout ", fpc_keepout, ")"));
     echo(str("FIT FPC on the wall: y ", fpc_y0, "..", fpc_y1, " of the straight ", r_in, "..", cav_y - r_in,
              ", top ", fpc_z1, " under the lid at ", z_lid_bot));
     echo(str("FIT coax: ", coax_fixed, " mm routed, ", coax_spare, " mm spare = ", coil_turns,
              " turns in the coil (2 fit)"));
 } else
     echo(str("FIT antenna overhang past battery = ", batt_x0 - xiao_x0, " mm (antenna zone ", ant_len, ")"));
-echo(str("FIT usb tunnel floor above battery = ",
-         (usb_cz - tun_h / 2) - batt_t, " mm  (only matters where the tunnel is over the battery: ",
-         xiao_flip ? "no" : "yes", ")"));
-echo(str("FIT mic chamber above mic = ", (z_rim - port_len) - chamber_z,
-         " mm (foam ", foam_t, " mm, seal: ", mic_seal, ")"));
-echo(str("FIT ", mic_seal == "ring" ? "gasket ring" : "mic pad holder", " to USB-C shell = ", usb_gasket_gap, " mm"));
+echo(str("FIT USB-C port (", xiao_flip ? "left" : "right", " wall, ", usb_yc + CY, " mm above the centre): slot ",
+         tun_w, " x ", tun_h, ", floor ", (usb_cz - tun_h / 2) - batt_t, " mm above the battery",
+         xiao_flip ? " (not over it)" : "", ", plug ", z_rim - (usb_cz + tun_h / 2),
+         " mm under the lid rim", eagle ? " (it slides in behind the wing)" : ""));
+if (ext_mic) {
+    echo(str("FIT mic board IM73D122: port at x ", mic_x + CX, ", y ", mic_y + CY, " (capsule frame); stack lid ",
+             mic_lid_port, " + gasket ", mgk_c, " + board ", mpcb_t, " + mic ", mpcb_parts[2], " = ", mic_depth + lid_t,
+             " mm under the front of the lid"));
+    echo(str("FIT mic board clearance: tightest ", mic_gap_min, " mm (", mic_tightest, ")"));
+} else {
+    echo(str("FIT mic chamber above mic = ", (z_rim - port_len) - chamber_z,
+             " mm (foam ", foam_t, " mm, seal: ", mic_seal, ")"));
+    echo(str("FIT ", mic_seal == "ring" ? "gasket ring" : "mic pad holder", " to USB-C shell = ", usb_gasket_gap, " mm"));
+}
 echo(str("FIT switch leg tips to SD board = ", (sw_x0 - sw_leg_l) - sd_x1, " mm"));
-echo(str("FIT LED window: ", led_mic_web, " mm of plastic to the mic port, sleeve to mic boss ", led_boss_gap,
-         " mm, pipe to USB-C shell ", led_usb_gap, " mm"));
+echo(str("FIT LED window: ", led_mic_web, " mm of plastic to the mic port",
+         ext_mic ? "" : str(", sleeve to mic boss ", led_boss_gap, " mm"), ", pipe to USB-C shell ", led_usb_gap, " mm"));
+if (screws)
+    echo(str("FIT lid screw bosses: ", z_lid_bot - boss_z0, " mm long, ", boss_z0 - batt_t, " mm above the battery"));
 
 // antenna rules, one per board
 if (lm) {
     assert(keep_x0 - fpc_x1 >= fpc_keepout, "FPC antenna is closer than fpc_keepout to the battery or a board");
     assert(min(batt_x0, xiao_x0, sd_x0 - stor_over) >= keep_x0, "battery, XIAO or storage inside the FPC keepout");
-    assert(fpc_conn_dist >= fpc_keepout, "FPC antenna is closer than fpc_keepout to the magnetic connector");
     assert(fpc_y0 >= r_in + 0.3 && fpc_y1 <= cav_y - r_in - 0.3,
            "FPC antenna is longer than the straight part of the left wall (cavity too short)");
     assert(fpc_z1 <= z_lid_bot - 0.3, "FPC antenna is taller than the cavity");
@@ -626,14 +742,32 @@ if (lm) {
     assert(z_over + cr <= z_lid_bot - 0.2, "no room for the coax over the IPEX4 plug under the lid");
 } else
     assert(batt_x0 - xiao_x0 >= ant_len, "antenna zone is over the battery");
-assert(usb_cz - tun_h / 2 > batt_t || xiao_flip, "USB tunnel hits the battery");
-assert((z_rim - port_len) - chamber_z >= foam_t, "no room for the foam disc");
-assert(usb_gasket_gap >= 0, "mic boss / gasket sits on the USB-C receptacle: re-measure mic_from_usb");
+assert(usb_cz - tun_h / 2 > batt_t || xiao_flip, "USB-C port slot hits the battery");
+assert(usb_yc + tun_w / 2 <= cav_y - 1 && usb_yc - tun_w / 2 >= 1, "USB-C port slot breaks into the top or bottom wall");
 assert(sw_x0 - sw_leg_l > sd_x1, "switch legs hit the SD board");
+assert(!screws || z_lid_bot - boss_z0 >= 6.5, "lid screw bosses are shorter than the M1.6 x 8 screw needs (6.5 mm)");
+if (ext_mic) {
+    // IM73D122 board: acoustic stack-up
+    assert(port_d >= 1.0, "mic port in the lid must be at least 1.0 mm");
+    assert(mic_lid_port <= mic_wall_max, str("lid is ", mic_lid_port, " mm at the mic port (max mic_wall_max): counterbore it"));
+    assert(mgk_c >= 0.3 && mgk_c <= 0.5, str("mic gasket compresses to ", mgk_c, " mm (0.3..0.5 wanted)"));
+    assert(mgk_id >= max(port_d, mpcb_hole) + 0.3, "mic gasket hole must be wider than the lid port and the board's sound hole");
+    assert(mgk_on_board >= 0.3, "mic gasket ring hangs over the edge of the mic board");
+    assert(bezel_port_d >= port_d + 0.6, "the bezel / plate hole must be wider than the lid port");
+    assert(mpcb_parts[1] / 2 <= mpcb_w / 2 - mpk_lip - 0.2, "mic board parts don't pass between the pocket rails");
+    assert(mpcb_parts[0] / 2 <= mpcb_port && mpcb_l - mpcb_port - mpcb_parts[0] / 2 >= mpcb_pads,
+           "mic and cap don't fit between the closed end and the wire pads");
+    assert(mpk_lip - tol >= 0.25, "pocket rails hold the mic board's edges by under 0.25 mm");
+    // IM73D122 board: clear of the boards, battery, USB-C, LED pipe, bosses, pegs and antenna
+    for (g = mic_gaps) assert(g[1] >= mic_clr, str("mic board: ", g[0], " only ", g[1], " mm apart (needs mic_clr)"));
+} else {
+    assert((z_rim - port_len) - chamber_z >= foam_t, "no room for the foam disc");
+    assert(usb_gasket_gap >= 0, "mic boss / gasket sits on the USB-C receptacle: re-measure mic_from_usb");
+}
 // recording LED window (required)
 assert(led_on_board, "LED light pipe is not over the XIAO (it must sit on the LED, clear of the battery and boards)");
 assert(led_mic_web >= led_web, str("LED window is only ", led_mic_web, " mm from the mic port (needs led_web)"));
-assert(led_boss_gap >= 0.4, "LED guide sleeve runs into the lid's mic boss");
+assert(ext_mic || led_boss_gap >= 0.4, "LED guide sleeve runs into the lid's mic boss");
 assert(led_usb_gap >= 0.2, "LED light pipe hits the USB-C shell");
 assert(led_peg_gap >= 0.4, "LED window runs into a bezel peg hole");
 assert(!lm || led_coil_gap >= 0.3, "LED light pipe runs into the coax coil");
@@ -686,7 +820,7 @@ module rrect(w, h, r) {
 module outline(inset = 0) offset(delta = -inset) rrect(OW, OH, R_out);
 module slab(inset, z) translate([0, 0, z]) linear_extrude(0.01) outline(inset);
 
-// Outer pebble. grow > 0 inflates it (used for the dock cradle clearance).
+// Outer pebble. grow > 0 inflates it (used for the stand seat clearance).
 module pebble(grow = 0) {
     hull() {
         for (i = [0 : back_steps]) {
@@ -697,7 +831,7 @@ module pebble(grow = 0) {
         slab(front_ch - grow, z_top + grow);
     }
 }
-module capsule_envelope(grow = 0) {   // pebble + bail (+ skin pad), for the dock
+module capsule_envelope(grow = 0) {   // pebble + bail (+ skin pad), for the stand
     pebble(grow);
     bail_solid(grow);
     if (skin_pad) translate([0, 0, -pad_proud]) pebble(grow);
@@ -727,20 +861,38 @@ module lm_antenna() {
     }
 }
 
+// IM73D122 board as fitted in the lid pocket: board, mic + cap, the four wires leaving the -X end
+module mic_board() {
+    zf = z_lid_bot - mgk_c;  zb = zf - mpcb_t;
+    color("DarkGreen", 0.9) difference() {
+        box([mb_x0, mb_y0, zb], [mb_x1, mb_y1, zf]);
+        translate([mic_x, mic_y, zb - 1]) cylinder(d = mpcb_hole, h = mpcb_t + 2, $fn = 16);
+    }
+    color("Black", 0.9) box([mic_x - mpcb_parts[0] / 2, mic_y - mpcb_parts[1] / 2, zb - mpcb_parts[2]],
+                            [mic_x + mpcb_parts[0] / 2, mic_y + mpcb_parts[1] / 2, zb]);
+    color("Crimson", 0.9) for (i = [0 : 3])
+        translate([mb_x0 - 3, mic_y - mwire_w / 2 + mwire_d / 2 + i * (mwire_d + 0.2), zb - mwire_d / 2])
+            rotate([0, 90, 0]) cylinder(d = mwire_d, h = 3 + mpcb_pads, $fn = 12);
+}
+// its gasket ring, compressed between the lid and the board (assembly view only)
+module mic_gasket_fitted() C() translate([mic_x, mic_y, z_lid_bot - mgk_c]) difference() {
+    cylinder(d = mgk_od, h = mgk_c, $fn = 32);
+    translate([0, 0, -1]) cylinder(d = mgk_id, h = mgk_c + 2, $fn = 24);
+}
+
 module electronics() {
     C() {
-        // battery (+ PCM end toward the connector)
+        // battery (+ PCM end toward the bottom wall)
         color("RoyalBlue", 0.75) box([batt_x0, batt_y0, 0], [batt_x1, batt_y1, batt_t]);
         color("White", 0.8) box([batt_x0 + 2, batt_y0, batt_t - 0.01], [batt_x1 - 2, batt_y0 + 4, batt_t + 0.01]);
         // XIAO
         color("ForestGreen", 0.8) box([xiao_x0, xiao_y0, board_z0], [xiao_x1, xiao_y1, pcb_top]);
         if (!lm)   // chip-antenna zone, always at the LEFT end
             color("Gold", 0.8) box([xiao_x0, xiao_y0 + 2, pcb_top], [xiao_x0 + ant_len, xiao_y1 - 2, pcb_top + 0.8]);
-        ux = xiao_flip ? xiao_x0 - bd_usb_over : xiao_x1 - bd_usb_len + bd_usb_over;
-        color("Silver", 0.9) box([ux, (xiao_y0 + xiao_y1 - bd_usb_w) / 2, pcb_top],
-                                 [ux + bd_usb_len, (xiao_y0 + xiao_y1 + bd_usb_w) / 2, pcb_top + bd_usb_h]);
-        color("Red", 0.9) translate([mic_x, mic_y, pcb_top + bd_mic_pkg[2] / 2])
+        color("Silver", 0.9) box([ux0, usb_yc - bd_usb_w / 2, pcb_top], [ux0 + bd_usb_len, usb_yc + bd_usb_w / 2, usb_shell_z1]);
+        color("Red", 0.9) translate([onb_x, onb_y, pcb_top + bd_mic_pkg[2] / 2])   // the XIAO's own mic
             cube(bd_mic_pkg, center = true);
+        if (ext_mic) mic_board();
         // onboard RGB LED and the light pipe up to the front face (counts in interference)
         color("White", 0.9) translate([led_x, led_y, pcb_top + led_pkg[2] / 2]) cube(led_pkg, center = true);
         color("LightCyan", 0.7) translate([led_x, led_y, pipe_z0]) cylinder(d = led_pipe_d, h = pipe_z1 - pipe_z0, $fn = 24);
@@ -753,9 +905,6 @@ module electronics() {
         } else        // microSD card, overhanging to the LEFT
             color("DimGray", 0.9) box([sd_x0 - sd_card_overhang, (sd_y0 + sd_y1 - sd_card_w) / 2, board_z0 + 1.6],
                                       [sd_x0 + 15 - sd_card_overhang, (sd_y0 + sd_y1 + sd_card_w) / 2, sd_top]);
-        // magnetic connector (mating face flush with the outer bottom)
-        color("Goldenrod", 0.85) box([conn_cx - conn_l / 2, -wall, conn_z0],
-                                     [conn_cx + conn_l / 2, -wall + conn_d, conn_z0 + conn_h]);
         // slide switch, actuator out through the right wall
         color("DarkOrange", 0.85) box([sw_x0, sw_yc - sw_l / 2, sw_z0], [sw_x1, sw_yc + sw_l / 2, sw_z0 + sw_w]);
         color("Black", 0.9) box([sw_x1, sw_yc - sw_act[0] / 2, sw_z0 + (sw_w - sw_act[1]) / 2],
@@ -795,18 +944,14 @@ module peg_positions() C() for (p = peg_list) translate([p[0], p[1], 0]) childre
 
 module body_internal() {
     C() {
-        // connector pedestal + back stop
-        box([conn_cx - conn_l / 2 - 1, 0, 0], [conn_cx + conn_l / 2 + 1, -wall + conn_d + tol, conn_z0 - tol]);
-        for (s = [-1, 1]) translate([conn_cx + s * (conn_l / 2 - 3) - 1, -wall + conn_d + tol, 0])
-            cube([2, 1.2, conn_z0 + conn_h / 2]);
         // plastic-only rib under the very end of the XIAO (antenna end); the LM20A sits on the battery
         if (!lm) box([0, xiao_y0 + 2, 0], [xiao_x0 + 1.0, xiao_y1 - 2, board_z0]);
         // switch retaining ribs
         for (s = [-1, 1]) box([sw_x0, sw_yc + s * (sw_l / 2 + tol) + (s > 0 ? 0 : -1), sw_z0 - 0.5],
                               [cav_x + 0.01, sw_yc + s * (sw_l / 2 + tol) + (s > 0 ? 1 : 0), sw_z0 + sw_w]);
     }
-    if (lid_fastening == "screws")
-        boss_positions() cylinder(r = boss_r, h = z_lid_bot);
+    if (screws)   // they hang from the rim to just above the battery
+        boss_positions() translate([0, 0, boss_z0]) cylinder(r = boss_r, h = z_lid_bot - boss_z0);
 }
 
 module body_cuts() {
@@ -819,9 +964,6 @@ module body_cuts() {
     // bezel pry notch at the bottom seam
     translate([0, -OH / 2, z_rim - 0.6]) cube([8, 2 * wall, 1.2], center = true);
     C() {
-        // connector window + keying slot
-        box([conn_cx - conn_l / 2 - tol, -wall - 1, conn_z0 - tol], [conn_cx + conn_l / 2 + tol, 1, conn_z0 + conn_h + tol]);
-        box([conn_cx + key_dx - key_w / 2, -wall - 1, 0.3], [conn_cx + key_dx + key_w / 2, -wall + key_d, 0.3 + key_h]);
         // switch: actuator window (with travel) and finger recess
         wy = sw_act[0] + sw_travel + 2 * tol;
         wz = sw_act[1] + 2 * tol;
@@ -830,19 +972,17 @@ module body_cuts() {
         box([cav_x + wall - sw_pocket, sw_yc - wy / 2 - 1.5, sz - wz / 2 - 1.2], [cav_x + wall + 1, sw_yc + wy / 2 + 1.5, sz + wz / 2 + 1.2]);
         // LM20A: flat locating pocket for the FPC antenna in the left wall
         if (lm) box([-fpc_pocket, fpc_y0 - tol, fpc_z0 - tol], [0.01, fpc_y1 + tol, fpc_z1 + tol]);
-        // USB-C service tunnel + plug-cap counterbore
-        if (usb_port) {
-            yc = (xiao_y0 + xiao_y1) / 2;
-            if (xiao_flip) {
-                box([-wall - 1, yc - tun_w / 2, usb_cz - tun_h / 2], [usb_face_x + 0.01, yc + tun_w / 2, usb_cz + tun_h / 2]);
-                box([-wall - 1, yc - tun_w / 2 - 1, usb_cz - tun_h / 2 - 1], [-wall + 0.6, yc + tun_w / 2 + 1, usb_cz + tun_h / 2 + 1]);
-            } else {
-                box([usb_face_x - 0.01, yc - tun_w / 2, usb_cz - tun_h / 2], [cav_x + wall + 1, yc + tun_w / 2, usb_cz + tun_h / 2]);
-                box([cav_x + wall - 0.6, yc - tun_w / 2 - 1, usb_cz - tun_h / 2 - 1], [cav_x + wall + 1, yc + tun_w / 2 + 1, usb_cz + tun_h / 2 + 1]);
-            }
+        // USB-C port: open slot for the cable overmould + the dust cap's flange recess
+        yc = usb_yc;
+        if (xiao_flip) {
+            box([-wall - 1, yc - tun_w / 2, usb_cz - tun_h / 2], [usb_face_x + 0.01, yc + tun_w / 2, usb_cz + tun_h / 2]);
+            box([-wall - 1, yc - tun_w / 2 - 1, usb_cz - tun_h / 2 - 1], [-wall + 0.6, yc + tun_w / 2 + 1, usb_cz + tun_h / 2 + 1]);
+        } else {
+            box([usb_face_x - 0.01, yc - tun_w / 2, usb_cz - tun_h / 2], [cav_x + wall + 1, yc + tun_w / 2, usb_cz + tun_h / 2]);
+            box([cav_x + wall - 0.6, yc - tun_w / 2 - 1, usb_cz - tun_h / 2 - 1], [cav_x + wall + 1, yc + tun_w / 2 + 1, usb_cz + tun_h / 2 + 1]);
         }
     }
-    if (lid_fastening == "screws")
+    if (screws)
         boss_positions() translate([0, 0, z_lid_bot - 6]) cylinder(d = screw_pilot, h = 7);
     bail_hole();
     if (skin_pad) pad_pocket();
@@ -868,14 +1008,29 @@ module body() {
 // =====================================================================
 //  Lid (front plate, carries the mic acoustic port)
 // =====================================================================
+// IM73D122 board pocket under the lid: two long walls with a rail lip under each long edge of
+// the board and a stop wall at the closed (+X) end; open at the wire end. The board slides in
+// along X with its gasket ring, which is squeezed between the lid and the board.
+module mic_pocket() C() {
+    zl = z_lid_bot - mgk_c - mpcb_t - mpk_lip_t;     // bottom of the rails
+    zb = z_lid_bot - mgk_c - mpcb_t;                 // the board's back face rests on the rails
+    wx0 = mb_x0 + 0.5;
+    difference() {
+        box([wx0, mb_y0 - tol - mpk_wall, zl], [mb_x1 + tol + mpk_wall, mb_y1 + tol + mpk_wall, z_lid_bot + 0.01]);
+        box([wx0 - 1, mb_y0 - tol, zb], [mb_x1 + tol, mb_y1 + tol, z_lid_bot + 1]);                // board + gasket
+        box([wx0 - 1, mb_y0 + mpk_lip, zl - 1], [mb_x1 + tol, mb_y1 - mpk_lip, zb + 0.01]);         // between the rails
+    }
+}
+
 module lid() {
     lw = cav_x + 2 * rabbet - 2 * tol;
     lh = cav_y + 2 * rabbet - 2 * tol;
     difference() {
         union() {
             translate([0, 0, z_lid_bot]) linear_extrude(lid_t) rrect(lw, lh, r_in + rabbet - tol);
-            // mic boss down to the gasket (ring) or the foam pad on the mic (pad)
-            C() translate([mic_x, mic_y, 0]) {
+            if (ext_mic) mic_pocket();
+            // mic = "onboard": mic boss down to the gasket (ring) or the foam pad on the mic (pad)
+            else C() translate([mic_x, mic_y, 0]) {
                 translate([0, 0, wide_z]) cylinder(d = mic_boss_d, h = z_lid_bot - wide_z + 0.01);
                 if (mic_seal == "pad")
                     translate([-mhold[0] / 2, -mhold[1] / 2, boss_bot]) cube([mhold[0], mhold[1], z_lid_bot - boss_bot + 0.01]);
@@ -888,21 +1043,24 @@ module lid() {
                         sphere(d = 0.9, $fn = 16);
         }
         C() translate([mic_x, mic_y, 0]) {
-            translate([0, 0, z_rim - port_len - 0.01]) cylinder(d = port_d, h = port_len + 1, $fn = 24);   // 1 mm port
+            if (ext_mic)   // straight through the lid, onto the gasket ring
+                translate([0, 0, z_lid_bot - 1]) cylinder(d = port_d, h = lid_t + 2, $fn = 24);
+            else
+                translate([0, 0, z_rim - port_len - 0.01]) cylinder(d = port_d, h = port_len + 1, $fn = 24);   // 1 mm port
             if (mic_seal == "ring") {
                 translate([0, 0, boss_bot - 1]) cylinder(d = foam_dia, h = z_rim - port_len - boss_bot + 1);   // foam + air chamber
                 translate([0, 0, boss_bot - 1]) difference() {                                                 // gasket groove
                     cylinder(d = gasket_od + 2 * tol, h = 1 + gasket_groove);
                     translate([0, 0, -1]) cylinder(d = gasket_id - 2 * tol, h = 3 + gasket_groove);
                 }
-            } else {
+            } else if (mic_seal == "pad") {
                 translate([0, 0, chamber_z]) cylinder(d = foam_dia, h = z_rim - port_len - chamber_z);         // foam + air chamber
                 translate([-bd_mic_pkg[0] / 2 - tol, -bd_mic_pkg[1] / 2 - tol, boss_bot - 1])                  // foam pad pocket
                     cube([bd_mic_pkg[0] + 2 * tol, bd_mic_pkg[1] + 2 * tol, 1 + mpad_pocket]);
                 translate([0, 0, boss_bot]) cylinder(d = mpad_hole + 0.4, h = chamber_z - boss_bot + 0.01, $fn = 24);
             }
         }
-        if (lid_fastening == "screws")
+        if (screws)
             boss_positions() {
                 translate([0, 0, z_lid_bot - 1]) cylinder(d = screw_clear, h = lid_t + 2);
                 translate([0, 0, z_rim - (screw_head - screw_clear) / 2 - 0.01])
@@ -1115,7 +1273,7 @@ module eagle_plate(detail = true) {
     }
 }
 
-// convex envelope pieces of the plate, for the dock's seat and slide path
+// convex envelope pieces of the plate, for the stand's seat and slide path
 module plate_env_piece(i, grow = 0) {
     nw = 1 + len(wing_feathers);
     zt = i == 1 ? plate_T : wing_t + relief_max;
@@ -1131,7 +1289,7 @@ module plate_env_piece(i, grow = 0) {
 // =====================================================================
 //  Small parts
 // =====================================================================
-module usb_plug() {   // printed cap for the USB-C service tunnel (prints flange-down)
+module usb_plug() {   // optional dust cap for the USB-C port slot (prints flange-down)
     fit = 0.1;
     union() {
         cube([tun_w + 2 - 2 * tol, tun_h + 2 - 2 * tol, 0.6]);
@@ -1139,8 +1297,13 @@ module usb_plug() {   // printed cap for the USB-C service tunnel (prints flange
         translate([-1.5, (tun_h + 2 - 2 * tol) / 2 - 1, 0]) cube([2, 2, 0.6]);   // pull tab
     }
 }
-module gasket() {     // ring: print in TPU 95A, or punch from 1.5 mm closed-cell foam
-    if (mic_seal == "ring")
+module gasket() {
+    if (mic_seal == "board")   // IM73D122: template; punch it from mgk_t closed-cell silicone sponge / PORON
+        difference() {
+            cylinder(d = mgk_od, h = mgk_t, $fn = 48);
+            translate([0, 0, -1]) cylinder(d = mgk_id, h = mgk_t + 2, $fn = 32);
+        }
+    else if (mic_seal == "ring")   // ring: print in TPU 95A, or punch from 1.5 mm closed-cell foam
         difference() {
             cylinder(d = gasket_od, h = gasket_t);
             translate([0, 0, -1]) cylinder(d = gasket_id, h = gasket_t + 2);
@@ -1165,7 +1328,7 @@ module below_back(inset, dz) intersection() {
 }
 module pad_pocket() below_back(pad_margin, pad_recess);
 
-// the pad as fitted (domed, for the assembly and the dock envelope check)
+// the pad as fitted (domed, for the assembly and the stand envelope check)
 module skin_pad_fitted() difference() {
     below_back(pad_margin + tol, pad_recess);
     below_back(pad_margin + tol - 1, -pad_proud);
@@ -1216,6 +1379,7 @@ module assembly() {
     color("SaddleBrown") bezel();
     if (eagle) color("Sienna") eagle_pins();
     if (skin_pad) color("DarkSlateGray") skin_pad_fitted();
+    if (ext_mic) color("DimGray") mic_gasket_fitted();
     electronics();
 }
 

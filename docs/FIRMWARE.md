@@ -6,8 +6,8 @@ The Zephyr board target is `xiao_ble/nrf52840/sense`.
 
 Related docs:
 
-- [`WIRING.md`](WIRING.md): pins, power, the switch, the LED and the pogo connector.
-  Pin names below refer to it.
+- [`WIRING.md`](WIRING.md): pins, power, the mic board, the switch, the LED and the
+  USB-C port. Pin names below refer to it.
 - [`SYNC-PROTOCOL.md`](SYNC-PROTOCOL.md): the chunk format, list/fetch/ack, time-set,
   and the on-device X25519 + AES-GCM encryption. **This document treats a chunk's
   ciphertext as opaque.** It only says where the encryption runs and what it costs.
@@ -25,6 +25,12 @@ Related docs:
 Anything marked **ESTIMATE** must be replaced with a bench measurement
 (section 11) before we rely on it.
 
+> **What changed (Nov 2026, owner decisions):** USB-C is the only charge and sync
+> path. The dock UART on D6/D7 and the pogo dock are gone; **USB CDC-ACM** on the
+> XIAO's own port carries the sync protocol, SMP and MCUboot serial recovery, and BLE
+> stays as the wireless fallback. The mic is an external **Infineon IM73D122** (PDM
+> CLK D4, DATA D6, power D2) with the onboard mic held off. The default cell is 600 mAh.
+
 ---
 
 ## 1. Design rules
@@ -36,8 +42,8 @@ Anything marked **ESTIMATE** must be replaced with a bench measurement
    leaks nothing.
 3. **Power-loss safe by construction.** At most the chunk currently being written is
    lost on a brownout or crash. Committed chunks are never corrupted.
-4. **Sealed case:** every update, recovery and diagnostic path works over BLE or the
-   dock UART. SWD is used once, before sealing.
+4. **Sealed case:** every update, recovery and diagnostic path works over BLE or
+   USB CDC on the capsule's USB-C port. SWD is used once, before sealing.
 5. **Small modules with host tests.** Each module (ring storage, chunker, time base,
    VAD stats) builds and runs under `native_sim` with a RAM disk, so an AI agent can
    write and verify it without hardware.
@@ -61,7 +67,7 @@ Anything marked **ESTIMATE** must be replaced with a bench measurement
 ## 3. Audio pipeline and threads
 
 ```
- PDM mic (P1.00 clk / P0.16 data, power P1.10)
+ IM73D122 PDM mic (CLK D4/P0.04 @ 1.28 MHz, DATA D6/P1.11, power D2/P0.28; onboard mic P1.10 LOW)
    |  EasyDMA, 2 x 100 ms buffers (1600 samples x int16), 16 kHz mono
    v
  [PDM IRQ, prio 5]  -- memcpy -->  PCM ring (0.5 s, 16 KB)
@@ -79,28 +85,50 @@ Anything marked **ESTIMATE** must be replaced with a bench measurement
    v
  microSD over SPI2 @ 8 MHz
                                   [sync thread, prio 6]  list/fetch/ack over
-                                     BLE GATT or the dock UART (SYNC-PROTOCOL.md);
+                                     USB CDC or BLE GATT (SYNC-PROTOCOL.md);
                                      reads committed chunks only
- [supervisor thread, prio 8]  watchdog feeding, battery/charger, dock state,
+ [supervisor thread, prio 8]  watchdog feeding, battery/charger, plug state,
                               privacy switch, LED, IMU state, time base persistence
  BT controller (MPSL/SDC) runs at ISR/zero-latency priority; BT host RX/TX threads at defaults.
 ```
 
 Why it is shaped this way:
 
-- **PDM:** 1.28 MHz clock, ratio 80 → 16 kHz, gain from Omi's tuned config (`MIC_GAIN 64`).
-  The IRQ only copies into the ring. The 100 ms DMA blocks match Omi's `mic.c`.
+- **PDM (IM73D122):** **1.28 MHz clock, ratio 80 → 16 kHz.** Never the nRF52840 default
+  of 1.032 MHz (ratio 64): the IM73D122 is not specified between 0.85 and 1.2 MHz, so its
+  SNR there is unknown. 1.231, 1.28 and 1.333 MHz are inside its normal-mode range
+  (1.2-1.65 MHz; 71 dB(A) is specified at 1.536 MHz, so ~70-71 dB(A) at 1.28 MHz is
+  **unverified**). Use **nrfx PDM directly with the documented enums**
+  (`NRF_PDM_FREQ_1280K`, `NRF_PDM_RATIO_80X`), as Omi's `mic.c` does, rather than
+  Zephyr's `dmic` driver, whose prescaler search on the nRF52840 may pick another clock.
+  Assert the clock in a test (T6b).
+- **Gain:** the IM73D122's sensitivity is −26 dBFS, the same as the stock mic, so Omi's
+  tuned `MIC_GAIN 64` carries over.
+- **Power-up:** D2 HIGH, wait, start PDM, then **discard the first ~50-100 ms** of samples
+  (the datasheet allows up to 50 ms for VDD ramp and start-up). This happens at boot and
+  after every privacy period, so the chunk after privacy starts with a short gap.
+- **Channel and edge:** the board's L/R jumper picks the channel; firmware reads that
+  one (`NRF_PDM_MODE_MONO`, matching edge). Silence or noise on first power-up usually
+  means the jumper and the PDM edge setting disagree: flip one before suspecting the board.
+- **Current:** the IM73D122 draws ~0.7-0.9 mA at our clock and supply (690 µA typ is
+  specified at 1.536 MHz/1.8 V; 3.3 V from a GPIO is higher, unverified). The stock mic's
+  draw is unknown, so the net change is **+0.1-0.5 mA (unverified)**. `feasibility.py`
+  carries 0.8 / 1.1 mA for the mic line (stock was 0.6 / 0.8). Measured in T6b and T16.
+- **Stock-mic fallback:** a build flag switches back to the onboard mic (P1.00/P0.16,
+  power P1.10) at the same 1.28 MHz/ratio 80. Keep it building so a bad mic board never
+  blocks the rest of the project.
+- The IRQ only copies into the ring. The 100 ms DMA blocks match Omi's `mic.c`.
 - **Codec thread** has the highest app priority. If it starves, audio is lost.
   The PCM ring of 0.5 s covers BLE connection events and flash erase stalls.
 - **Opus settings (start):** Omi's proven setup: `OPUS_APPLICATION_RESTRICTED_LOWDELAY`
   (CELT only), complexity 3, VBR, 16 kHz mono, `SIGNAL_VOICE`. Two deliberate
   changes to evaluate on the bench:
   - **Bitrate 24 kbps** instead of Omi's 32 kbps. A full day is 259 MB at 24 kbps
-    and 346 MB at 32 kbps (`feasibility.py`). Over the dock UART (~90 KB/s) that is
-    ~0.8 h / ~1.1 h. Over BLE it is ~1.8 h at the unmeasured 40 KB/s estimate, but
-    **~14 h / ~19 h at the 5 KB/s Boswell measured** on this board, longer than the
-    night. That is why the dock UART is the primary path. 24 kbps cuts every figure by
-    25%. Choose the final value by Whisper word error rate on our own recordings at
+    and 346 MB at 32 kbps (`feasibility.py`). Over USB CDC (300 KB/s **ESTIMATE**, 100
+    worst) that is ~14 min at 24 kbps, ~58 min at 32 kbps and the worst rate. Over BLE it
+    is ~1.8 h at the unmeasured 40 KB/s estimate, but **~14 h / ~19 h at the 5 KB/s
+    Boswell measured** on this board, longer than the night. That is why USB CDC is the
+    primary path. 24 kbps cuts every figure by 25%. Choose the final value by Whisper word error rate on our own recordings at
     16/24/32 kbps. `feasibility.py` models 24 (typical) and 32 kbps (`--worst`).
   - **20 ms frames** instead of 10 ms. Latency doesn't matter for storage, and 20 ms CELT
     frames give better quality per bit and halve per-frame overhead (TOC byte,
@@ -123,12 +151,12 @@ Why it is shaped this way:
 | PDM IRQ copy, ring management | < 1% |
 | AES-256-GCM in software, 3 KB/s | < 1% |
 | SPI SD writes (EasyDMA, 4 KB every ~1.4 s) | < 1% CPU; the DMA does the transfer |
-| BLE sync (host stack) while docked | 5-15% during transfers |
+| Sync while plugged in (USB CDC, or the BLE host stack) | 5-15% during transfers |
 | Total while worn | ~20-35%, which is where the 1.2-2.5 mA CPU line in `feasibility.py` comes from |
 
 How to measure it: wrap `opus_encode()` with `k_cycle_get_32()` and log the
-mean and max cycles per frame. Toggle a spare GPIO (D2) around it and watch
-it on the PPK2's digital channel together with current.
+mean and max cycles per frame. Toggle a spare GPIO (D7, if no SD load switch is
+fitted) around it and watch it on the PPK2's digital channel together with current.
 
 ---
 
@@ -150,8 +178,8 @@ it on the PPK2's digital channel together with current.
 | Other stacks (main, storage, sync, supervisor, sysworkq, BT RX, ISR, idle) | ~24 | |
 | mcumgr / SMP buffers | 4-6 | |
 | Kernel, drivers, settings/NVS cache, misc | ~8 | |
-| USB CDC console (bench builds only) | 0 / 8 | Off in production. |
-| **Total** | **~157-189** | Sum of the lines above: low 156.6, high 188.6 (bench build with USB CDC); production high ~181. **~67-99 KB headroom** (~75 KB at the production high end). RAM is not a risk, and an optional ~14 KB per-slot ACK cache (section 8) still fits. |
+| USB device stack + CDC-ACM (sync port + SMP port), in production | 6-10 | It is the sync path now, not a bench console. A log console, if wanted, is a third CDC interface in bench builds. |
+| **Total** | **~163-191** | Sum of the lines above: low 162.6, high 190.6. **~65-93 KB headroom.** RAM is not a risk, and an optional ~14 KB per-slot ACK cache (section 8) still fits. |
 
 ### Flash: 1 MB internal + 2 MB QSPI
 
@@ -160,47 +188,50 @@ Measure with `west build -t rom_report`. These figures are **ESTIMATES** for a
 
 | Component | KB |
 |---|---|
-| Zephyr kernel, drivers (GPIO, SPI, UART, ADC, I2C, WDT, PDM, QSPI) | 30-40 |
+| Zephyr kernel, drivers (GPIO, SPI, ADC, I2C, WDT, PDM, QSPI) | 30-40 |
+| USB device stack + CDC-ACM | 15-25 |
 | BLE host + SoftDevice Controller (peripheral only) | 120-160 |
 | **Opus 1.2.1 fixed-point encoder** (Omi compiles the CELT and SILK sources; dropping SILK files we never call saves some) | **80-160** |
 | PSA crypto: AES-256-GCM (software; CC310 has no GCM), X25519, SHA-256/HKDF | 30-60 |
-| mcumgr / SMP (image + OS groups, BT + UART transports) | 25-40 |
+| mcumgr / SMP (image + OS groups, BT + serial-over-CDC transports) | 25-40 |
 | disk_access + SD over SPI + raw ring (FATFS would add ~25) | 15-25 |
 | Sensors, settings/NVS, app logic | 35-65 |
-| **App total** | **~335-550** |
+| **App total** | **~350-575** |
 
 Layout decision:
 
-- **Both MCUboot slots in internal flash** gives (1024 − 48 MCUboot − 32 NVS) / 2 ≈ **472 KB
+- **MCUboot size:** with the QSPI driver and **USB CDC serial recovery** (section 9) it
+  probably outgrows a 48 KB partition. Budget **64 KB** (**ESTIMATE**; measure in M4).
+- **Both MCUboot slots in internal flash** gives (1024 − 64 MCUboot − 32 NVS) / 2 ≈ **464 KB
   per slot**, which is *below* the high estimate. That is a real risk.
 - **Recommended:** put the **secondary slot on the onboard 2 MB QSPI NOR (P25Q16H)**
   (`CONFIG_PM_EXTERNAL_FLASH_MCUBOOT_SECONDARY` in NCS). The primary slot becomes about
-  **940 KB**, and the rest of the QSPI chip (about 1 MB) is free for a crash log.
-  MCUboot then needs the QSPI driver (+~8-16 KB to its size). Keep the QSPI chip in
-  deep power-down (`has-dpd`) when idle, or it adds standby current.
+  **928 KB**, and the rest of the QSPI chip (about 1 MB) is free for a crash log.
+  Keep the QSPI chip in deep power-down (`has-dpd`) when idle, or it adds standby current.
 
 ---
 
-## 5. Power, charging and dock state
+## 5. Power, charging and plug state
 
 ### States
 
 | State | Entered when | Audio | Radio | Indicator LED (D3) | Notes |
 |---|---|---|---|---|---|
-| WORN | VBUS absent, IMU shows motion within the last N min | recording | BLE off; an on-demand window only after the pull gesture (below) | **on (slow blink), required** | the normal day |
+| WORN | VBUS absent, IMU shows motion within the last N min | recording | BLE off; an on-demand window only after the pull gesture (below) | **on (slow blink), required** | the normal day; USB-C dust cap on |
 | STILL | VBUS absent, no motion for > 10 min | recording, tagged `still` | as WORN | **on (slow blink), required** | probably left on a table; optionally drop to a lower bitrate |
-| DOCKED | `USBDETECTED` (VBUS present) | recording (sleep audio), tagged `docked` | UART enabled and sync over it (primary). BLE advertises only as the fallback when no UART host sends HELLO within ~60 s of docking | may be dimmed or off (configurable) | charging at 100 mA |
-| PRIVACY | switch D5 HIGH | **firmware drives mic power P1.10 LOW, PDM stopped** | unchanged | off | open chunk closed; the next chunk is flagged `after_privacy` (SYNC-PROTOCOL.md §3) |
-| LOW_BATT | VBAT < 3.50 V off dock | recording | radio off | warning pattern (still visibly on) | |
+| PLUGGED | `USBDETECTED` (VBUS present): the stand, a charger or the PC | recording (sleep audio on the stand), tagged `plugged` | **PC** (USB configured): sync over USB CDC (primary). **Plain charger** (no enumeration within ~5 s), or a PC that sends no HELLO within ~60 s: BLE advertises as the fallback | may be dimmed or off (configurable) | charging at 100 mA |
+| PRIVACY | switch D5 HIGH | **firmware drives external mic power D2 LOW, PDM stopped; onboard mic stays off (P1.10 LOW)** | unchanged | off | open chunk closed; the next chunk is flagged `after_privacy` (SYNC-PROTOCOL.md §3) |
+| LOW_BATT | VBAT < 3.50 V unplugged | recording | radio off | warning pattern (still visibly on) | |
 | OFF | VBAT < 3.40 V, or a "storage mode" command | none | none | off | close the chunk, persist state, **System OFF**; wakes on VBUS (USB detect) or the D5 GPIO |
 
-**Indicator rule:** the LED is on whenever the capsule records off the dock (WORN, STILL,
-LOW_BATT). It may be dimmed or turned off only in DOCKED (WIRING.md §5, LEGAL.md). The
+**Indicator rule:** the LED is on whenever the capsule records unplugged (WORN, STILL,
+LOW_BATT). It may be dimmed or turned off only in PLUGGED (WIRING.md §5, LEGAL.md). The
 supervisor drives it from the state. If the supervisor stalls, it stops feeding the
 watchdog and the device resets (section 9).
 
 **Privacy switch:** it is **firmware-enforced**. D5 is read by firmware, which stops
-PDM and drives the mic's power line (P1.10) LOW. It is not a hardware kill (WIRING.md §4).
+PDM and drives the external mic's power line (D2) LOW; the onboard mic's power (P1.10)
+is LOW at all times. It is not a hardware kill (WIRING.md §4 has the DPDT upgrade path).
 
 **On-demand BLE pull gesture.** There is no button. Flick the switch
 **privacy → record → privacy → record within 3 s** (each position held ≥ 100 ms after
@@ -210,37 +241,46 @@ and closes a chunk, so the gesture costs ~1-3 s of audio and two short chunks. A
 double-tap (the LSM6DS3TR-C's embedded tap detection on INT1) is the alternative if the
 switch pattern proves awkward; it costs no audio but needs the accelerometer awake.
 
-### Dock detection via VBUS
+### Plug detection via VBUS, and PC vs charger
 
 The XIAO's 5V pin is the nRF52840's VBUS (WIRING.md section 3), so the POWER peripheral
 raises `USBDETECTED` / `USBREMOVED` with nothing extra wired. Use
-`nrfx_power` USB events, or poll `nrf_power_usbregstatus_vbusdet_get()` from the
-supervisor. Debounce for 500 ms, because pogo contacts bounce as the magnet seats.
-On dock: drive P0.13 LOW, enable `uart0` on D6/D7, wait for a UART HELLO, and start
-BLE advertising only if none arrives (fallback).
-On undock: disable `uart0` and set D6/D7 to disconnected inputs (no driven voltage on
-exposed contacts), stop advertising, and turn the indicator back on.
-A dock and a PC USB cable look the same on VBUS. If that matters, tell them apart by
-whether USB enumeration happens or the dock bridge answers on UART.
+`nrfx_power` USB events (the USB stack consumes them), or poll
+`nrf_power_usbregstatus_vbusdet_get()` from the supervisor. Debounce for 500 ms
+(a plug going in at an angle can make and break VBUS).
+
+- **On plug-in:** drive P0.13 LOW (100 mA), enable the USB device stack. A charger and a
+  PC look the same on VBUS; **enumeration tells them apart**. If the host configures the
+  device (`USB_DC_CONFIGURED` in the NCS v2.7 legacy stack), it's a PC: the sync service
+  listens on the CDC sync port for HELLO. If nothing enumerates within ~5 s, it's a plain
+  charger (a BC1.2 charger shorts D+/D− and never enumerates): start the BLE fallback
+  advertising. A PC that enumerates but sends no HELLO within ~60 s also gets the BLE
+  fallback.
+- **On unplug:** disable the USB stack, stop advertising, and turn the indicator back on.
+- **VBUS current:** the charger takes up to 100 mA from VBUS, plus the USB regulator.
+  That is at a USB 2.0 unit load, which a host allows before configuration. Declare
+  ~150 mA in the descriptor (`CONFIG_USB_MAX_POWER=75`, 2 mA units) for margin
+  (**VERIFY** that no host refuses it).
 
 ### Charging with no power path (BQ25101)
 
 The BQ25101 charges the battery node, and the whole system runs from that same
 node. Consequences and rules:
 
-1. **Charge at 100 mA (P0.13 LOW) whenever docked.** At 50 mA, the 10% termination
+1. **Charge at 100 mA (P0.13 LOW) whenever plugged in.** At 50 mA, the 10% termination
    threshold is 5 mA, which is close to the 3-4 mA recording load. Termination might
    then not happen until the radio goes quiet.
 2. **Termination vs. sync load.** The charger sees battery current *plus* system
    current. If the system draws more than 10 mA (10% of 100 mA) once the cell is
    full, as it can during a BLE bulk sync at +8 dBm, the charger never sees
    termination and sits in CV until the **10 h safety timer** expires.
-   Mitigation: **sync first, then let it top off.** Sync starts right after docking,
-   while the charger is still in CC. Use **0 dBm TX on the dock** (the PC is close;
-   6.4 mA vs 16.4 mA peak at +8 dBm). Use long connection intervals
-   once the bulk transfer is done.
-3. **Timer budget.** A 16 h day off the dock uses about 50 mAh typical, 122 mAh worst
-   (`feasibility.py`), which refills in ~0.7-2.1 h at 100 mA, far inside the 10 h fast-charge timer (which is extended
+   Mitigation: **sync first, then let it top off.** A USB CDC sync starts right after
+   plug-in and takes ~15 min to ~1 h (**ESTIMATE**), while the charger is still in CC.
+   For the BLE fallback, use **0 dBm TX** (the PC is close; 6.4 mA vs 16.4 mA peak at
+   +8 dBm) and long connection intervals once the bulk transfer is done.
+3. **Timer budget.** A 16 h day unplugged uses about 54 mAh typical, 126 mAh worst
+   (`feasibility.py`; the mAh don't depend on the cell size), which refills in
+   ~0.8-2.2 h at 100 mA, far inside the 10 h fast-charge timer (which is extended
    during DPM/thermal regulation). The precharge timer (30 min) only matters for
    a deeply flat cell.
 4. **Recharge cycling.** After termination, the recording load drains the cell until the
@@ -290,7 +330,7 @@ curve table measured on our cell (M16).
 | Option | Pros | Cons |
 |---|---|---|
 | **A. No device VAD; store everything** (recommended) | No lost speech onsets, whispers, or quiet sleep-talk and snoring, which an energy gate will clip. Silero VAD on the PC is far better than anything that fits here, and it can be re-run when the models improve. No tuning in the field. | More storage and sync time. That is cheap: 32 GB holds about **80 days** in fixed 256 KiB slots (section 8), whatever the bitrate. |
-| B. Energy VAD gates recording on the device | Less data and less sync time | Irreversible: dropped audio is gone. Thresholds depend on noise floor, clothing rub and the dock environment. |
+| B. Energy VAD gates recording on the device | Less data and less sync time | Irreversible: dropped audio is gone. Thresholds depend on noise floor, clothing rub and the bedside environment. |
 | C. Opus DTX | Built into Opus | Mostly effective in SILK/VOIP mode. With CELT-only restricted-low-delay in Opus 1.2.1, its benefit is doubtful. **VERIFY** before relying on it. |
 
 **Decision: A, plus cheap device-side metadata.** The codec thread computes,
@@ -301,7 +341,7 @@ floor wait for the v2 trailer extension. All of it is inside the ciphertext, so 
 device and the host see it only after decryption.
 **No speech-first fetch in v1** (former M15 dropped): the VAD data is encrypted and
 LIST_ITEM carries only `seq`, size and SHA-256, so the host cannot rank chunks before
-fetching them, and the dock UART moves a whole day in ~1 h anyway. The host runs
+fetching them, and USB CDC moves a whole day in ~15 min to ~1 h (**ESTIMATE**) anyway. The host runs
 Silero on everything. An optional later step: drop to 8-12 kbps after more than 30 s of deep silence
 (reversible, audio kept), never a gate.
 
@@ -322,7 +362,7 @@ Silero on everything. An optional later step: drop to 8-12 kbps after more than 
   ships with the accelerometer disabled.
 - **What it's used for:** WORN vs STILL detection (section 5), chunk tags so the PC
   can tell "worn conversation" from "on the desk", and an optional bitrate drop when
-  STILL. **Dock detection uses VBUS, not the IMU.** VBUS is authoritative.
+  STILL. **Plug detection uses VBUS, not the IMU.** VBUS is authoritative.
 - Fallback: if the IMU ever proves too costly, cut P1.08 and use the audio
   noise-floor stats alone to separate worn from still.
 
@@ -369,7 +409,7 @@ Keep FAT only for the Omi bench test (M1).
   record has a valid CRC and the expected seq is committed; anything else is free or
   torn. LIST reads the commit table, never the audio.
 - **Early close:** the chunk is closed short (the trailer records the actual duration)
-  on privacy, dock/undock, low battery, a time-set, and when the next frame would not
+  on privacy, plug-in/unplug, low battery, a time-set, and when the next frame would not
   fit in the slot, so state changes are chunk boundaries.
 - **Boot recovery:** read the newest metadata record → scan the commit table forward
   from the head hint until the seq breaks → that is the head. A torn slot just after
@@ -398,9 +438,11 @@ Keep FAT only for the Omi bench test (M1).
 
 `spi2` at **8 MHz**. That is the SPIM0-2 maximum; Omi's 24 MHz request is silently
 clamped (WIRING.md section 1). That gives about 1 MB/s raw, while recording needs
-about 3 KB/s and sync reads need at most about 90 KB/s. The card stays in SPI idle between
-writes. The optional D4 load switch can power-cycle it if bench measurement shows
-high idle current (0.1-1 mA, varying by card brand).
+about 3 KB/s and a USB CDC sync reads 100-300 KB/s (**ESTIMATE**). During a sync the SD
+card (read latency, sharing the bus with recording writes) is the likely limit, not USB:
+read in multi-block runs of 16-64 KB, and let a recording write pre-empt a read. The card
+stays in SPI idle between writes. The optional D7 load switch can power-cycle it if bench
+measurement shows high idle current (0.1-1 mA, varying by card brand).
 
 ---
 
@@ -427,18 +469,25 @@ high idle current (0.1-1 mA, varying by card brand).
    **never in the repo**. MCUboot rejects anything unsigned.
 3. **Swap with revert:** a new image boots as "test". The app confirms it
    (`boot_write_img_confirmed()`) only after a self-test: PDM produces non-silent
-   samples, an SD write/read round-trip succeeds, and BLE is up. If it never confirms, the
+   samples from the IM73D122, an SD write/read round-trip succeeds, BLE is up, and (if
+   plugged into a PC) USB enumerates. If it never confirms, the
    next reset (watchdog) reverts to the old image.
 4. **Transports:** mcumgr SMP over **BLE**, requiring a bonded and encrypted link
-   (`CONFIG_MCUMGR_TRANSPORT_BT_AUTHEN`), and over the **dock UART**. On the PC, use
-   `smpmgr` / `smpclient` (Python, built on bleak) or the `mcumgr` CLI.
-5. **Last-resort rescue:** MCUboot **serial recovery on the dock UART**
-   (`CONFIG_BOOT_SERIAL_UART` + `CONFIG_BOOT_SERIAL_WAIT_FOR_DFU`, ~500 ms
-   window at every boot). A bricked app that still watchdog-resets can be
-   re-flashed from the dock without opening the case.
+   (`CONFIG_MCUMGR_TRANSPORT_BT_AUTHEN`), and over **USB CDC**: the device is a
+   composite with **two CDC-ACM interfaces**, one for the sync protocol and one for SMP
+   (`CONFIG_MCUMGR_TRANSPORT_UART` on that CDC-ACM UART), so SMP's framing and the sync
+   protocol's SLIP never share a port. On the PC, use `smpmgr` / `smpclient` (Python) or
+   the `mcumgr` CLI on the SMP port.
+5. **Last-resort rescue:** MCUboot **serial recovery over USB CDC**
+   (`CONFIG_BOOT_SERIAL_CDC_ACM` + `CONFIG_BOOT_SERIAL_WAIT_FOR_DFU`). USB has to
+   enumerate first, so the wait window is ~2-3 s, not 500 ms (**ESTIMATE**), and costs
+   that much audio on every reboot. MCUboot's boot hooks can skip the wait when VBUS is
+   absent, so a watchdog reset while worn doesn't lose it (**VERIFY** on the pinned NCS).
+   A bricked app that still watchdog-resets can be re-flashed over a USB-C cable without
+   opening the case.
 6. Enable `CONFIG_BT_PRIVACY` (resolvable private addresses) so the capsule can't
-   be tracked by its BLE address. Advertise only as the docked fallback (no UART host) or
-   after the on-demand pull gesture (section 5).
+   be tracked by its BLE address. Advertise only as the plugged-in fallback (plain
+   charger, or no HELLO from a PC) or after the on-demand pull gesture (section 5).
 
 ---
 
@@ -450,21 +499,22 @@ checked). Keep their copyright notices in reused files and credit them in
 
 | Omi file | Verdict | Why |
 |---|---|---|
-| `src/mic.c` (nrfx PDM, a port of Seeed's Arduino mic code) | **Reuse**, lightly adapted | Proven PDM config, gain, IRQ wiring, mic power on P1.10. Add start/stop for privacy. |
+| `src/mic.c` (nrfx PDM, a port of Seeed's Arduino mic code) | **Reuse**, adapted | Proven nrfx PDM config, gain and IRQ wiring. Change: pins to CLK P0.04 / DIN P1.11, power to D2 (P1.10 held LOW), clock to 1.28 MHz ratio 80, the post-power-up discard, start/stop for privacy. |
 | `src/codec.c` + `src/lib/opus-1.2.1/` + the CMake flags (`OPUS_ARM_*` EDSP) | **Reuse** | The Opus build is the hardest part to get right on Zephyr. Change: 20 ms frames, bitrate, a smaller stack after measuring, and the VAD stats hook. |
 | `src/config.h` | Reuse as a reference | Pin and codec constants. |
-| `overlay/xiao_ble_sense_devkitv2-adafruit.overlay`, `prj_*.conf` | **Reuse for M1 only** | Our wiring matches its SPI and CS pins. Our own overlay drops I2S, sets 8 MHz SPI, and adds `uart0`. |
+| `overlay/xiao_ble_sense_devkitv2-adafruit.overlay`, `prj_*.conf` | **Reuse for M1 only** | Our wiring matches its SPI and CS pins. Our own overlay drops I2S, keeps `uart0` off, moves `pdm0` to D4/D6, sets 8 MHz SPI, and adds the two CDC-ACM nodes. |
 | `src/button.c` | Borrow the debounce pattern only | Our D5 is a 2-state switch, not a tap button. |
 | `src/transport.c` (battery ADC) | Borrow the ADC setup | We add the P0.14 rule and charge awareness. |
 | `src/sdcard.c`, `src/storage.c` | **Replace** | FAT file-per-session and an unencrypted, Omi-specific BLE storage protocol. Ours is the raw ring + SYNC-PROTOCOL.md. |
 | `src/transport.c` (BLE audio streaming) | **Replace** | We don't stream live. |
-| `src/speaker.c`, haptic, NFC, `usb.c` | Drop | Not in our hardware. |
+| `src/speaker.c`, haptic, NFC | Drop | Not in our hardware. |
+| `usb.c` | Read, don't reuse | Our USB use (plug state, CDC sync, SMP) is written fresh. |
 | `src/wdog_facade.c` | Read it, then write our own | Our watchdog policy is check-in based. |
 | `scripts/devkit/sdcard_test_files/decode_audio.py` | **Reuse on the PC** for bench decoding of raw Opus frames (M5) | |
 
 **Write fresh:** raw ring storage, the chunker + encryption (to SYNC-PROTOCOL.md),
-the sync service, the time base, the supervisor/watchdog, power/charge/dock
-management, the IMU low-power helper, the MCUboot/partition setup, and host tests.
+the sync service (USB CDC + BLE), the time base, the supervisor/watchdog,
+power/charge/plug management, the IMU low-power helper, the MCUboot/partition setup, and host tests.
 
 ---
 
@@ -477,28 +527,29 @@ bench build with the USB CDC console). Don't move on until a step passes.
 |---|---|---|
 | T0 | Bare XIAO, blinky over UF2, USB CDC log | Builds and runs on `xiao_ble/nrf52840/sense`. |
 | T1 | **Power hygiene + baseline:** IMU off (P1.08 LOW), mic off, LEDs off, P0.14 LOW, System ON idle | Record the µA on the **PPK2 in source-meter mode at 3.8 V into the BAT pads**, USB unplugged. This is the floor every later number is compared to. |
-| T2 | Back-feed check: battery only, measure the 5V pin to GND | About 0 V (WIRING.md section 3). |
-| T3 | Charger: dock with P0.13 LOW, then HIGH-Z; ammeter in series with the battery | About 100 mA / 50 mA in CC; `/CHG` (P0.17) LOW while charging. |
+| T2 | VBUS dead on battery: battery only, measure the 5V pin to GND | About 0 V (WIRING.md section 3), so the exposed USB-C contacts carry no voltage while worn. |
+| T3 | Charger: plug a USB charger, P0.13 LOW, then HIGH-Z; ammeter in series with the battery | About 100 mA / 50 mA in CC; `/CHG` (P0.17) LOW while charging. |
 | T4 | VBAT ADC (P0.14 LOW, AIN7) vs a multimeter at the BAT pads | Within ±30 mV when not charging. |
-| T5 | VBUS events: dock and undock 20 times | Every transition is seen, debounced, with no spurious events. |
-| T6 | PDM alone: 10 s of PCM to RAM, dumped over CDC | Clean audio at a sensible level. Note the current delta. |
+| T5 | VBUS events: plug and unplug 20 times each into a PC and into a plain charger | Every transition is seen, debounced, with no spurious events. PC vs charger is told apart by enumeration every time. |
+| T6 | PDM with the **stock** mic (fallback build): 10 s of PCM to RAM, dumped over CDC | Clean audio at a sensible level. Note the current delta. This is the reference for T6b. |
+| T6b | PDM with the **IM73D122** board on D4/D6, power D2, P1.10 LOW: same capture | PDM clock measured at 1.28 MHz on a scope or logic analyser (never 1.032). No click or DC step after the power-up discard. Same script as T6 at 0.3/1/2 m: noise floor lower than the stock mic, speech level within a few dB (same −26 dBFS sensitivity). Current delta vs T6 within +0.1-0.5 mA. D2 LOW → mic draws 0. |
 | T7 | Opus alone: encode the recorded PCM; cycles per frame; stack high-water | Real time with ≥ 2× margin. Decodes on the PC with `decode_audio.py` / `opusdec`. |
 | T8 | SD alone at 8 MHz: init, CD pin, 4 KB raw write/read patterns, **1 h write-latency histogram** | No errors. The worst-case latency sets the encoded-queue size. Note idle current with the card in. |
 | T9 | IMU alone: WHO_AM_I, accel low-power, wake interrupt on P0.11 | The interrupt fires on a tap. Current matches the datasheet (tens of µA). |
 | T10 | Switch (D5) and LED (D3) | Both positions read correctly, with zero static current in either. |
-| T11 | UART over the pogo pins with the dock bridge at 1 Mbaud | Loopback with no errors. Pins high-Z when undocked. |
+| T11 | USB CDC sync: plug into the PC, run the host `SerialTransport` against a full ring while recording continues | Enumerates as two CDC-ACM ports. Measured KB/s into `feasibility.py` (`USB_KBYTES_S`); ≥ 100 KB/s, i.e. a 32 kbps day in < 1 h. No audio gaps during the sync. Cable pulled mid-transfer → the next sync resumes. |
 | T12 | BLE: bond with the PC, bulk-throughput test with bleak | Measured KB/s. Put it into `feasibility.py` (`BLE_KBYTES_S`). |
 | T13 | Crypto: AES-256-GCM in software and ChaCha20-Poly1305 on CC310 (KB/s) and X25519 timing | Within budget (section 3). |
 | T14 | Omi DK2 firmware unmodified on our wiring (switch on "record") | SD files appear, so the SPI/CS wiring is proven. |
 | T15 | Full pipeline, 24 h soak | No gaps, no resets, chunks decrypt and decode on the PC. |
-| T16 | **Current profile with the PPK2** over 10 min each: WORN-recording, PRIVACY, DOCKED+sync | Compare against `feasibility.py`. Replace the ESTIMATE lines with measured values. |
+| T16 | **Current profile with the PPK2** over 10 min each: WORN-recording (IM73D122), WORN-recording (stock-mic build), PRIVACY, PLUGGED+sync | Compare against `feasibility.py`. Replace the ESTIMATE lines, including the mic line, with measured values. |
 | T17 | Fault injection: 100 random power cuts during writes; a forced thread hang; a bad DFU image | The ring always recovers with at most one torn slot; the watchdog reset starts a new `boot_id` and the next sync reconciles its chunks; the DFU reverts. |
 
 **Multimeter vs PPK2:** a multimeter in series works for steady currents (charger
 CC current, a mA-level average), but its µA-range burden voltage can brown out the
 board on SD/radio peaks, and its averaging misses ms-scale bursts. Use the **PPK2**
 for anything averaged or sleep-level. Run it in source-meter mode at 3.7-3.8 V on the BAT
-pads with the cell removed, and use ampere-meter mode for docked charging tests.
+pads with the cell removed, and use ampere-meter mode for plugged-in charging tests.
 
 ---
 
@@ -514,26 +565,26 @@ check from section 11.
 | M2 | `boards/` overlay for Eagle Capsule pins + a power-hygiene init module | T1, T2 |
 | M3 | Power module: VBAT ADC, P0.13 control, `/CHG`, VBUS events | T3, T4, T5 |
 | M4 | **MCUboot via SWD + QSPI secondary slot + signed images + SMP over USB CDC** (all later work uses the final layout) | Upload/confirm/revert works on the bench. |
-| M5 | Mic + codec modules (ported from Omi), CPU/stack measured | T6, T7 |
+| M5 | Mic + codec modules (ported from Omi; IM73D122 at 1.28 MHz, stock-mic build flag), CPU/stack measured | T6, T6b, T7 |
 | M6 | Raw ring storage module (256 KiB slots, commit table, per-slot ACK, `dropped`) + `native_sim` RAM-disk tests incl. out-of-order ACKs + power-cut fault injector | Host tests pass, then T8 |
 | M7 | Pipeline PDM → Opus → plaintext chunks → ring | 1 h of audio decodes on the PC. |
 | M8 | Encryption per SYNC-PROTOCOL.md (PSA; X25519/SHA-256 on CC310, AES-256-GCM in software) + shared test vectors with the PC tool | The PC decrypts device chunks. T13 |
 | M9 | Time base (anchor from SET_TIME, chunk timestamps, optional `__noinit` prev-boot hint) | After a watchdog reset: new `boot_id`, `start_utc_ms = 0` until the next sync, and the host dates those chunks from that sync's anchor. |
 | M10 | Supervisor + watchdog check-ins + crash-loop safe mode | T17 (hang part) |
-| M11 | Firmware-enforced privacy switch (P1.10 LOW) + indicator LED rule + switch-flick pull gesture | T10. The mic draws 0 mA in privacy; the LED is on in every off-dock recording state. |
-| M12 | BLE sync service (list/fetch/ack) per SYNC-PROTOCOL.md + PC bleak client | T12. On-demand pull (gesture) and docked fallback work. A full day over BLE is not expected to fit the night at the measured 5 KB/s; that is M13's job. |
-| M13 | Dock: VBUS state machine, UART transport (sync + SMP), charge-rate rules | T11. A full day syncs over the UART in < 2 h. Charging terminates after a sync. |
+| M11 | Firmware-enforced privacy switch (D2 LOW, P1.10 LOW) + indicator LED rule + switch-flick pull gesture | T10. The mic draws 0 mA in privacy; the LED is on in every unplugged recording state. |
+| M12 | BLE sync service (list/fetch/ack) per SYNC-PROTOCOL.md + PC bleak client | T12. On-demand pull (gesture) and the plain-charger fallback work. A full day over BLE is not expected to fit the night at the measured 5 KB/s; that is M13's job. |
+| M13 | Plug state machine (PC vs charger), USB CDC transport (sync + SMP ports), charge-rate rules | T5, T11. A full day syncs over USB CDC in < 1 h. Charging terminates after a sync. |
 | M14 | IMU low-power helper + WORN/STILL state + chunk tags | T9 |
-| M15 | **Dropped for v1.** (Was: VAD-prioritised fetch.) The VAD data is inside the ciphertext and LIST_ITEM has only seq/size/sha256, and the dock UART makes it unnecessary. The per-second VAD bitmap is part of M7/M8. | n/a |
+| M15 | **Dropped for v1.** (Was: VAD-prioritised fetch.) The VAD data is inside the ciphertext and LIST_ITEM has only seq/size/sha256, and USB CDC makes it unnecessary. The per-second VAD bitmap is part of M7/M8. | n/a |
 | M16 | LOW_BATT / System OFF / storage mode, battery curve, power optimisation pass | T16 meets the `feasibility.py` budget. |
-| M17 | MCUboot serial recovery on the dock UART + BLE SMP with bonded auth | Rescue a deliberately bricked app from the dock. |
+| M17 | MCUboot serial recovery over USB CDC + BLE SMP with bonded auth | Rescue a deliberately bricked app over a USB-C cable. |
 | M18 | **Seal**: 72 h soak, T17 fault-injection, an over-the-air DFU on the sealed unit | All pass. |
 
 ---
 
 ## 13. Feasibility risks found
 
-1. **Flash:** with both MCUboot slots internal, about 472 KB per slot is below the
+1. **Flash:** with both MCUboot slots internal, about 464 KB per slot is below the
    high-end app estimate (BLE + Opus + crypto + SMP). **Mitigation:** put the secondary
    slot on the onboard QSPI flash.
 2. **The stock UF2 bootloader means no OTA.** MCUboot needs a **one-time SWD flash**
@@ -542,12 +593,21 @@ check from section 11.
    while full can stop termination until the 10 h timer runs out. **Mitigation:** sync early,
    0 dBm, 100 mA charge.
 4. **Sync time over BLE**: at the 5 KB/s Boswell measured, a full day takes ~14 h at
-   24 kbps and ~19 h at 32 kbps, longer than the night. **Mitigation:** the dock UART is
-   the primary path (~0.8-1.1 h); BLE is the docked fallback and for on-demand pulls.
+   24 kbps and ~19 h at 32 kbps, longer than the night. **Mitigation:** USB CDC is the
+   primary path (~15 min to ~1 h, **ESTIMATE**); BLE is the plain-charger fallback and
+   for on-demand pulls.
 5. **Omi's 24 MHz SPI request is really 8 MHz** (SPIM2). That is harmless, but don't plan on more.
 6. **The IMU is powered at boot** by the Zephyr board DTS, which costs about 1 mA unless it is handled.
-7. **Pin overlap with Omi DK2 firmware** (I2S on D1-D3, D5 long-press = power off).
-   Bench only; mitigated with a series resistor on CD and the switch semantics.
+7. **Pin overlap with Omi DK2 firmware** (I2S on D1-D3, haptic on D6, D5 long-press =
+   power off). Bench only; mitigated with a series resistor on CD, the switch semantics,
+   and running the Omi test before the mic board is wired.
+8. **The IM73D122's clock window:** the nRF52840's default PDM clock (1.032 MHz) is
+   outside the mic's specified ranges. **Mitigation:** 1.28 MHz/ratio 80 via the nrfx
+   enums, checked on a scope in T6b. RF coupling of the 1.28 MHz lines (P1.11 is a
+   low-frequency pin) is untested.
+9. **The exposed USB-C port** is used every night and open to sweat and lint while worn.
+   **Mitigation:** a printed dust cap, VBUS dead on battery (T2), BLE as the fallback if
+   the port fails, and SWD-free recovery over BLE SMP.
 
 ---
 
@@ -564,7 +624,9 @@ check from section 11.
 - Zephyr: board `boards/seeed/xiao_ble/`, `dts/vendor/nordic/nrf52840_partition_uf2_sdv7.dtsi`,
   disk access / SDMMC-over-SPI, the RAM disk, `native_sim`, the thread analyzer, mcumgr/SMP.
   <https://docs.zephyrproject.org/latest/services/device_mgmt/mcumgr.html>
-- Nordic: nRF52840 Product Specification (SPIM, POWER/USBREG, WDT, CC310, SAADC),
+- Infineon IM73D122 datasheet (PDM clock ranges, SNR, current, power-up time):
+  <https://www.infineon.com/dgdl/Infineon-IM73D122-DataSheet-v01_00-EN.pdf?fileId=8ac78c8c83cd3081018409cafdfb46db>
+- Nordic: nRF52840 Product Specification (SPIM, PDM, USBD, POWER/USBREG, WDT, CC310, SAADC),
   nRF52840 errata (anomaly 198), and nRF Connect SDK docs (partition manager, external
   flash MCUboot secondary slot, SoftDevice Controller, PSA crypto).
   <https://docs.nordicsemi.com/bundle/ps_nrf52840/page/keyfeatures_html5.html>,

@@ -3,10 +3,10 @@
 
 For each line of hardware/variants.txt (OpenSCAD -D settings, e.g.
 `battery="400" storage="pololu_sd"`), this renders the capsule's `interference`
-part (must be empty), the printable capsule parts and the dock, and prints the
-outer size the capsule echoes.
+part (must be empty), the printable capsule parts and the stand (dock.scad), and
+prints the outer size the capsule echoes, the eagle plate size and the stand footprint.
 
-Usage:  python3 hardware/check_cad.py [--openscad PATH] [--parts body,lid,...]
+Usage:  python3 hardware/check_cad.py [--openscad PATH] [--keep DIR] [--jobs N]
 """
 import argparse
 import os
@@ -16,10 +16,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CAPSULE_PARTS = ["body", "lid", "bezel", "pegs", "usb_plug", "gasket"]
-DOCK_PARTS = ["dock", "bottom_plate"]
+STAND_PARTS = ["stand"]
 FAIL_PATTERNS = ("ERROR:", "Assertion", "WARNING: Ignoring unknown", "undefined")
 
 
@@ -56,38 +57,57 @@ def render(openscad, scad, part, defs, outdir):
     return p.returncode, log, bad, empty
 
 
+def check_variant(openscad, defs, outdir):
+    """Render one variant line; return the lines to print and whether it failed."""
+    os.makedirs(outdir, exist_ok=True)
+    capsule = os.path.join(HERE, "capsule.scad")
+    stand = os.path.join(HERE, "dock.scad")
+    label = " ".join(defs) or "(defaults)"
+    rc, log, bad, empty = render(openscad, capsule, "interference", defs, outdir)
+    size = re.search(r"outer W x H x T = ([^\"]+)", log)
+    problems = list(bad)
+    if rc != 0 and not empty:   # openscad exits 1 when the result is empty, which is the goal here
+        problems.append(f"interference: openscad exit {rc}")
+    if not empty:
+        problems.append("interference is NOT empty: electronics overlap the shell")
+    extra = []
+    for scad, parts in ((capsule, CAPSULE_PARTS), (stand, STAND_PARTS)):
+        for part in parts:
+            rc, log, bad, empty = render(openscad, scad, part, defs, outdir)
+            if rc != 0 or bad or empty:
+                problems.append(f"{os.path.basename(scad)}:{part}: exit {rc}, "
+                                f"{'empty, ' if empty else ''}{'; '.join(bad[:3])}")
+            for pat, name in ((r"EAGLE plate W x H x T = ([\d.]+ x [\d.]+ x [\d.]+)", "plate"),
+                              (r"STAND footprint = ([\d.]+ x [\d.]+)", "stand")):
+                m = re.search(pat, log)
+                if m and part in ("bezel", "stand"):
+                    extra.append(f"{name} {m.group(1)}")
+    status = "ok  " if not problems else "FAIL"
+    lines = [f"{status} {label}  ->  {size.group(1) if size else 'size not echoed'}"
+             + (f"  [{', '.join(extra)}]" if extra else "")]
+    lines += [f"       {pr}" for pr in problems]
+    return lines, bool(problems)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--openscad")
-    ap.add_argument("--keep", help="directory to keep the STLs in")
+    ap.add_argument("--keep", help="directory to keep the STLs in (one subdirectory per variant)")
+    ap.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1),
+                    help="variants rendered in parallel (default: up to 8)")
     args = ap.parse_args()
     openscad = find_openscad(args.openscad)
     outdir = args.keep or tempfile.mkdtemp(prefix="eagle-cad-")
-    os.makedirs(outdir, exist_ok=True)
-    capsule = os.path.join(HERE, "capsule.scad")
-    dock = os.path.join(HERE, "dock.scad")
+    todo = variants()
     failures = 0
-    for defs in variants():
-        label = " ".join(defs) or "(defaults)"
-        rc, log, bad, empty = render(openscad, capsule, "interference", defs, outdir)
-        size = re.search(r"outer W x H x T = ([^\"]+)", log)
-        problems = list(bad)
-        if rc != 0 and not empty:   # openscad exits 1 when the result is empty, which is the goal here
-            problems.append(f"interference: openscad exit {rc}")
-        if not empty:
-            problems.append("interference is NOT empty: electronics overlap the shell")
-        for scad, parts in ((capsule, CAPSULE_PARTS), (dock, DOCK_PARTS)):
-            for part in parts:
-                rc, log, bad, empty = render(openscad, scad, part, defs, outdir)
-                if rc != 0 or bad or empty:
-                    problems.append(f"{os.path.basename(scad)}:{part}: exit {rc}, "
-                                    f"{'empty, ' if empty else ''}{'; '.join(bad[:3])}")
-        status = "ok  " if not problems else "FAIL"
-        print(f"{status} {label}  ->  {size.group(1) if size else 'size not echoed'}")
-        for pr in problems:
-            print(f"       {pr}")
-        failures += bool(problems)
-    print(f"\n{failures} failing variant(s)")
+    with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+        jobs = [pool.submit(check_variant, openscad, defs, os.path.join(outdir, f"v{i:02d}"))
+                for i, defs in enumerate(todo)]
+        for job in jobs:   # results print in variants.txt order
+            lines, failed = job.result()
+            print("\n".join(lines), flush=True)
+            failures += failed
+    print(f"\n{failures} failing variant(s) of {len(todo)}")
     sys.exit(1 if failures else 0)
 
 

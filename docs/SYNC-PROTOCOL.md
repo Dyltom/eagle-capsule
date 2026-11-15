@@ -1,8 +1,9 @@
 # Eagle Capsule chunk-sync protocol (v1)
 
 This is the contract between the pendant firmware and the host. It covers how audio
-is stored on the card and how the owner's PC pulls it off, over BLE GATT or over a
-byte-stream UART through the pogo dock. The reference host implementation and a
+is stored on the card and how the owner's PC pulls it off: over **USB CDC-ACM** on the
+capsule's USB-C port (the main path, a byte-stream serial link) or over **BLE GATT**
+(the wireless fallback). The reference host implementation and a
 simulated device are in [`host/`](../host/README.md). The tests there are the
 executable form of this document.
 
@@ -47,7 +48,7 @@ The card is not a filesystem. It is a raw ring of fixed **256 KiB slots, one chu
 slot** (FIRMWARE.md §8; a 60 s chunk is ~186 KB at 24 kbps, ~246 KB at 32 kbps). A
 per-slot commit record `{seq, size, sha256, boot_id, acked, CRC}`, written after the
 tag, is what LIST reads, so LIST never re-reads or re-hashes audio. A chunk closes early
-on state changes (privacy, dock/undock, low battery, time-set) or when the next frame
+on state changes (privacy, plug-in/unplug, low battery, time-set) or when the next frame
 would not fit the slot.
 
 **ACK state is per chunk**, not a watermark. Out-of-order ACKs are normal: the host
@@ -100,7 +101,7 @@ to order fetches (it is encrypted). Speech detection proper (Silero VAD) runs on
 | Bit | Name | Meaning |
 |---|---|---|
 | 0 | `utc_valid` | `start_utc_ms` came from a `SET_TIME` in **this** boot. Never set from a retained or projected clock. |
-| 1–2 | `state` | state when the chunk opened: 0 worn, 1 still, 2 docked, 3 reserved |
+| 1–2 | `state` | state when the chunk opened: 0 worn, 1 still, 2 plugged in (VBUS present; called `docked` in earlier drafts), 3 reserved |
 | 3 | `after_privacy` | the previous chunk was closed by the privacy switch (the privacy marker) |
 | 4 | `safe_mode` | recorded in watchdog safe mode (FIRMWARE.md §9) |
 | 5–7 | reserved | 0 |
@@ -115,7 +116,7 @@ So these fields are reserved for **`version = 2`**, which needs a host update fi
 ```
   TRAILER_EXT (after vad_bitmap, v2 only):
     ext_len u16 (bytes that follow; a v2 host skips what it does not know)
-    close_reason u8   0 normal (60 s), 1 privacy, 2 dock, 3 undock, 4 low battery,
+    close_reason u8   0 normal (60 s), 1 privacy, 2 plug-in, 3 unplug, 4 low battery,
                       5 time-set, 6 slot full, 7 shutdown
     peak_dbfs i8 | noise_floor_dbfs i8          per-chunk level stats (VAD summary)
     prev_boot_id u32 | prev_last_mono_ms u64    retained hint: this boot began shortly after
@@ -221,14 +222,19 @@ These are what "verified and durable" in `ACK` means. The reference client imple
 
 ## 5. Transports
 
-The same frames go over both links. Only the framing differs.
+The same frames go over both links. Only the framing differs. **USB CDC is the main
+path; BLE is the fallback.**
+
+> **What changed (Nov 2026):** the earlier plan carried this framing over a 1 Mbaud UART
+> on the pogo dock's spare pins (~90 KB/s). The dock is gone: USB-C is the only charge and
+> sync path, so the same framing now runs over USB CDC-ACM, and BLE stays as the fallback.
 
 ### 5.1 BLE GATT
 
-BLE is the **docked fallback** (no UART host answered) and the **on-demand** path
-(FIRMWARE.md §5: a switch-flick gesture opens a 2 min window). It is off while worn.
-At the 5 KB/s measured on this board a full 24 kbps day takes ~14 h, so BLE is not the
-nightly path.
+BLE is the **fallback** when the capsule is plugged into a plain charger with no PC (or
+a PC that sends no HELLO), and the **on-demand** path (FIRMWARE.md §5: a switch-flick
+gesture opens a 2 min window). It is off while worn. At the 5 KB/s measured on this board
+a full 24 kbps day takes ~14 h, so BLE is not the nightly path.
 
 * One primary service, `bd6970b7-810b-4975-9ad6-c8479ca96def`.
   * **CTRL** `bd6970b8-…`: Write Without Response. One host to device frame per write.
@@ -245,20 +251,35 @@ nightly path.
   operations (§6.3), and link encryption additionally hides LIST metadata (sizes, counts)
   from sniffers and stops an active man-in-the-middle from injecting frames after AUTH.
 
-### 5.2 UART (pogo dock), or USB CDC
+### 5.2 USB CDC-ACM (main path), or any serial byte stream
+
+When the capsule is plugged into the PC or home server, it enumerates as a composite USB
+device with two CDC-ACM ports: one for this protocol, one for SMP firmware updates
+(FIRMWARE.md §9). The host opens the sync port like any serial port (`/dev/ttyACM0`,
+`/dev/cu.usbmodem…`, `COMx`); the baud rate it sets is ignored.
 
 * Each frame is sent as a SLIP packet (RFC 1055: `END=0xC0, ESC=0xDB, ESC_END=0xDC,
   ESC_ESC=0xDD`) of `frame || CRC-32(frame)` (IEEE 802.3 / zlib polynomial, little-endian).
-  A leading `END` flushes line noise.
+  A leading `END` flushes line noise. USB already checks each packet with its own CRC, so
+  here SLIP gives frame boundaries on a byte stream, and the CRC-32 catches host driver or
+  buffer bugs and a port opened mid-frame, for ~0.8 % expansion on random ciphertext. The
+  bytes are identical over a hardware UART, so a bench UART works with the same code.
 * A frame with a bad CRC is dropped silently. The host sees a timeout or an offset gap,
   discards the rest of that window (up to its `DATA_END`, or a timeout), and re-FETCHes from
   its last good offset. A lost `DATA_END` is a timeout handled the same way.
 * The decoder drops any frame longer than 65,535 + 4 bytes without buffering it.
-* `max_frame` is typically 1024 (sized to the device TX buffer). The 1 Mbaud 8N1 line rate
-  is about 100 KB/s raw, 90+ KB/s of audio after framing. SLIP expands random ciphertext by
-  about 0.8 %.
-* The same framing works unchanged over the nRF52840's native USB as a CDC-ACM port, if the
-  dock ever carries D+/D- (12 Mbit/s, roughly 10x the UART).
+* `max_frame` is typically 1024 (sized to the device TX buffer); larger is allowed up to
+  65,535 if the device has the RAM.
+* **Throughput (ESTIMATE):** USB full speed is 12 Mbit/s, a ~1.2 MB/s ceiling for bulk
+  transfers. In practice the nRF52840's CDC-ACM stack, SLIP, and reading the card over
+  8 MHz SPI while recording continues set the rate: we assume **~300 KB/s typical, 100 KB/s
+  worst** until T11 measures it. That moves a 24 kbps day (259 MB) in ~14 min, and a
+  32 kbps day at the worst rate in ~58 min (`tools/feasibility.py`).
+* Unplugging the cable is a `Disconnected` on the host (the port read fails); the next
+  sync resumes from the `.partial` offset like any other dropped link.
+* The reference host transport is `SerialTransport` in `host/eagle_host/protocol.py`
+  (pyserial, or any object with `read`/`write`), tested against a fake port wired to the
+  simulated device.
 
 ---
 
@@ -376,7 +397,10 @@ filed as `unknown` and not projected. A result outside 2020–2100 is also `unkn
   recorder (writes about 2–4 KB/s) and FETCH reads. A FETCH of the chunk currently being
   written is not allowed: the open chunk is not listed.
 * AUTH proves the host's identity once per session but does not MAC each later frame. Over
-  BLE, rely on LESC bonding for per-frame integrity. The UART dock requires physical access.
+  BLE, rely on LESC bonding for per-frame integrity. The USB cable requires physical access
+  to the capsule and the PC. A public USB port (a kiosk, a car) can enumerate the capsule and
+  read INFO, but it cannot AUTH, so it cannot list, fetch, set the time or delete. Away from
+  home, prefer a plain charger or a charge-only cable.
 * **AUTH can be relayed, and chunks can be forged (v1 limitation).** The host answers AUTH
   for whatever challenge a peer presents, and nothing authenticates the device to the
   host. A rogue peripheral posing as the pendant can pass the real pendant's challenge to
@@ -385,8 +409,8 @@ filed as `unknown` and not projected. A result outside 2020–2100 is also `unkn
   every pendant's flash. Anyone holding it can make a chunk that decrypts and passes GCM.
   **Interim rule (implemented in the reference host):** the host sends AUTH and ACK only
   over a transport that declares `secure_link`: a BLE link bonded with LE Secure
-  Connections to the paired pendant, or the wired dock UART. A relay cannot present the
-  bonded pendant's identity. Any other link is refused unless the operator explicitly
+  Connections to the paired pendant, or the USB CDC cable (`SerialTransport` sets
+  `secure_link = True`). A relay cannot present the bonded pendant's identity. Any other link is refused unless the operator explicitly
   overrides it (tests and demos only). The host also limits what a forged chunk can do: it
   must carry INFO's `device_id`, and it can never overwrite an existing archive file.
   **TODO (v2):** (a) bind AUTH to the link, by adding a channel-binding value from the LESC

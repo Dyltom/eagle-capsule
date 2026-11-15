@@ -3,7 +3,9 @@
 Usage:
   ~/opt/blender.sh -b --factory-startup -P concepts/scripts/render_shot.py -- <shot> [--samples N] [--pct P]
 
-Shots: lowpoly, minimal, crest, exploded, dock, scale, scale-top
+Shots: lowpoly, minimal, crest, exploded, dock, scale, scale-top, cad
+(dock and cad import the real CAD STLs from hardware/build/; the others use the
+hand-built concept model in ec_common.py)
 """
 import math
 import os
@@ -20,8 +22,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUTDIR = os.path.normpath(os.path.join(HERE, '..', 'renders'))
 FILES = {
     'lowpoly': '01-lowpoly.png', 'minimal': '02-minimal.png', 'crest': '03-crest.png',
-    'exploded': '04-exploded.png', 'dock': '05-dock-nightstand.png', 'scale': '06-scale.png',
-    'scale-top': '07-scale-top.png',
+    'exploded': '04-exploded.png', 'dock': '05-stand-nightstand.png', 'scale': '06-scale.png',
+    'scale-top': '07-scale-top.png', 'cad': '08-cad.png',
 }
 
 
@@ -118,43 +120,76 @@ def shot_exploded():
         ec.rod('leader', p, anchor, 0.12, ec.M('leader'))
 
 
-# ------------------------------------------------------------------ dock on nightstand
-def shot_dock():
-    """The real dock from hardware/dock.scad (render hardware/build/dock.stl first)."""
-    stl = os.path.normpath(os.path.join(HERE, '..', '..', 'hardware', 'build', 'dock.stl'))
-    if not os.path.exists(stl):
-        raise SystemExit(f'missing {stl}: run  openscad -D \'part="dock"\' -o hardware/build/dock.stl hardware/dock.scad')
-    tilt = 30.0
-    feet = 0.9
-    seat_z = 18.0   # dock.scad: base_h - seat_depth, the connector face centre
-    root, objs = ec.build_capsule('lowpoly')
-    root.matrix_world = ec.pose_matrix(tilt, (-ec.A, 0.0, ec.STRIP_Z), (0, 0, seat_z + feet))
+# ------------------------------------------------------------------ CAD parts
+BUILD = os.path.normpath(os.path.join(HERE, '..', '..', 'hardware', 'build'))
 
-    bpy.ops.wm.stl_import(filepath=stl)
-    base = bpy.context.selected_objects[0]
-    base.name = 'dock'
-    base.location.z = feet
-    base.data.materials.append(ec.add_noise_bump(ec.pmat('dock warm grey', (0.36, 0.34, 0.31), 0.6), 3.0, 0.03))
-    ec.shade(base, 40)
+
+def import_stl(name, mat, sharp=40):
+    """Import hardware/build/<name>.stl (render it with OpenSCAD first, see concepts/README.md)."""
+    path = os.path.join(BUILD, name + '.stl')
+    if not os.path.exists(path):
+        raise SystemExit(f'missing {path}: render the CAD STLs first (concepts/README.md, "Re-render")')
+    bpy.ops.wm.stl_import(filepath=path)
+    o = bpy.context.selected_objects[0]
+    o.name = name
+    o.data.materials.append(mat)
+    ec.shade(o, sharp)
+    return o
+
+
+def cad_materials():
+    shell = ec.add_noise_bump(ec.pmat('PETG charcoal', (0.035, 0.036, 0.04), 0.42), 3.0, 0.02)
+    plate = ec.add_noise_bump(ec.pmat('PETG bronze', (0.30, 0.17, 0.07), 0.38), 3.0, 0.02)
+    return shell, plate
+
+
+# ------------------------------------------------------------------ CAD capsule hero
+def shot_cad():
+    """The real capsule from hardware/capsule.scad: body, lid and eagle plate (default variant)."""
+    ec.cyclorama((0.60, 0.60, 0.61))
+    shell, plate = cad_materials()
+    objs = [import_stl('body', shell), import_stl('lid', shell), import_stl('bezel', plate, 30)]
+    zmin = min((o.matrix_world @ Vector(c)).z for o in objs for c in o.bound_box)
+    for o in objs:
+        o.location.z -= zmin   # the domed back rests on the floor
+    tgt = (0.0, 2.0, 9.0)
+    ec.studio_lights(tgt, key_az=-150)
+    ec.world(strength=0.12)
+    ec.camera(ec.orbit(tgt, 300, 42, 260), tgt, lens=85)
+
+
+# ------------------------------------------------------------------ stand on nightstand
+def shot_dock():
+    """The real stand, posed capsule and plugged-in cable from hardware/dock.scad."""
+    feet = 0.9
+    shell, plate = cad_materials()
+    objs = [import_stl('stand', ec.add_noise_bump(ec.pmat('stand warm grey', (0.36, 0.34, 0.31), 0.6), 3.0, 0.03)),
+            import_stl('capsule_shell', shell), import_stl('capsule_plate', plate, 30),
+            import_stl('cable', ec.pmat('cable jacket', (0.04, 0.04, 0.042), 0.55), 60)]
+    for o in objs:
+        o.location.z = feet
+    base = objs[0]
     bb = [base.matrix_world @ Vector(c) for c in base.bound_box]
     x0, x1 = min(v.x for v in bb), max(v.x for v in bb)
     y0, y1 = min(v.y for v in bb), max(v.y for v in bb)
     ec.box('rubber feet', (x1 - x0 - 8, y1 - y0 - 8, feet), ((x0 + x1) / 2, (y0 + y1) / 2, feet / 2),
            ec.pmat('rubber', (0.02, 0.02, 0.02), 0.9), bev=0.3)
-    # USB-C cable out of the back wall (dock.scad: receptacle 5.6 mm above the bottom)
-    cz = feet + 5.6
-    ec.box('USB-C boot', (11, 9, 6.5), (0, y1 + 4.5, cz), ec.pmat('cable', (0.03, 0.03, 0.03), 0.5), bev=2.0, seg=5)
-    cu = bpy.data.curves.new('cable', 'CURVE')
+    # the cable's CAD ends at the table beside the stand; carry it on toward the back
+    cb = objs[3]
+    cbb = [cb.matrix_world @ Vector(c) for c in cb.bound_box]
+    cx = max(v.x for v in cbb) - 2.0
+    cy = (min(v.y for v in cbb) + max(v.y for v in cbb)) / 2
+    cu = bpy.data.curves.new('cable run', 'CURVE')
     cu.dimensions = '3D'
-    cu.bevel_depth = 1.8
+    cu.bevel_depth = 2.0
     cu.bevel_resolution = 4
     sp = cu.splines.new('BEZIER')
-    pts = [(0, y1 + 8, cz), (0, y1 + 22, cz - 0.5), (6, y1 + 40, 2.2), (30, y1 + 70, 1.8), (90, y1 + 100, 1.8), (220, y1 + 130, 1.8)]
+    pts = [(cx, cy, 2.0), (cx + 10, cy + 8, 2.0), (cx + 30, cy + 50, 2.0), (cx + 80, cy + 120, 2.0), (cx + 200, cy + 180, 2.0)]
     sp.bezier_points.add(len(pts) - 1)
     for bp, p in zip(sp.bezier_points, pts):
         bp.co = p
         bp.handle_left_type = bp.handle_right_type = 'AUTO'
-    cab = ec.link(bpy.data.objects.new('cable', cu))
+    cab = ec.link(bpy.data.objects.new('cable run', cu))
     cab.data.materials.append(ec.pmat('cable jacket', (0.04, 0.04, 0.042), 0.55))
 
     # nightstand
@@ -299,6 +334,7 @@ SHOTS = {
     'crest': lambda: shot_hero('crest'),
     'exploded': shot_exploded,
     'dock': shot_dock,
+    'cad': shot_cad,
     'scale': lambda: shot_scale(False),
     'scale-top': lambda: shot_scale(True),
 }

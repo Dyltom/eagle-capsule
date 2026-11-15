@@ -1,12 +1,14 @@
-"""Sync protocol messages, UART framing and an in-memory loopback transport.
+"""Sync protocol messages, serial framing, a serial-port transport and an in-memory loopback transport.
 
 A frame is: 1 type byte + fixed little-endian fields + optional payload (DATA only).
 BLE GATT: one frame per write (host->device) or notification (device->host).
-UART:     SLIP-delimited, frame + CRC-32 (see uart_encode / UartDecoder).
+Serial:   SLIP-delimited, frame + CRC-32 (see uart_encode / UartDecoder). Used over USB CDC-ACM
+          (the capsule's USB-C port) or a hardware UART on the bench; the bytes are the same.
 """
 from __future__ import annotations
 
 import struct
+import time
 import zlib
 from collections import deque
 from enum import IntEnum
@@ -132,6 +134,63 @@ class UartDecoder:
         return out
 
 
+# ---------------------------------------------------------------- serial-port transport
+
+class SerialTransport:
+    """Sync over a byte-stream serial port: USB CDC-ACM to the capsule, or a UART on the bench.
+
+    `port` is anything with pyserial's `write(bytes)`, `read(n) -> bytes` (b"" on timeout) and,
+    optionally, `in_waiting` and `close()`, e.g. `serial.Serial("/dev/ttyACM0", timeout=0.05)`.
+    Use `SerialTransport.open(path)` to let it import pyserial for you.
+    secure_link defaults to True: a USB cable needs physical access (SYNC-PROTOCOL.md section 8).
+    An OSError from the port (pyserial's SerialException is one, e.g. the cable was pulled)
+    becomes Disconnected; no complete frame within `timeout` seconds is a TimeoutError.
+    """
+
+    def __init__(self, port, *, max_frame: int = 1024, timeout: float = 2.0, secure_link: bool = True) -> None:
+        if not MIN_FRAME <= max_frame <= 0xFFFF:
+            raise ValueError(f"max_frame must be {MIN_FRAME}..65535")
+        self.port, self.max_frame, self.timeout, self.secure_link = port, max_frame, timeout, secure_link
+        self._dec = UartDecoder()
+        self._rx: deque[bytes] = deque()
+
+    @classmethod
+    def open(cls, path: str, **kw) -> "SerialTransport":
+        import serial  # pyserial: optional, only needed for a real port
+
+        # CDC-ACM ignores the baud rate; 1 Mbaud is right for a hardware UART on the bench.
+        return cls(serial.Serial(path, baudrate=1_000_000, timeout=0.05), **kw)
+
+    @property
+    def bad_frames(self) -> int:
+        return self._dec.bad
+
+    def send(self, frame: bytes) -> None:
+        if len(frame) > 0xFFFF:
+            raise ProtocolError("frame too long")
+        try:
+            self.port.write(uart_encode(frame))
+        except OSError as e:
+            raise Disconnected(f"serial write failed: {e}") from e
+
+    def recv(self) -> bytes:
+        deadline = time.monotonic() + self.timeout
+        while not self._rx:
+            if time.monotonic() > deadline:
+                raise TimeoutError("no response from device")
+            try:
+                data = self.port.read(getattr(self.port, "in_waiting", 0) or 1)
+            except OSError as e:
+                raise Disconnected(f"serial read failed: {e}") from e
+            self._rx.extend(self._dec.feed(data))
+        return self._rx.popleft()
+
+    def close(self) -> None:
+        close = getattr(self.port, "close", None)
+        if close:
+            close()
+
+
 # ---------------------------------------------------------------- loopback transport
 
 class LoopbackTransport:
@@ -143,7 +202,7 @@ class LoopbackTransport:
     corrupt_data:    flip a byte in the Nth DATA frame (models corruption the link CRC cannot see,
                      e.g. a bad SD read on the device).
     secure_link:     whether the client may AUTH and ACK over this link. A real transport sets it
-                     only for a bonded LE Secure Connections link or the wired dock UART. The
+                     only for a bonded LE Secure Connections link or the USB cable. The
                      loopback is in-process, so nothing can relay or inject; tests set False.
     """
 

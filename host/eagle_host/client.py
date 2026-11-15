@@ -97,7 +97,7 @@ class SyncClient:
     def _handshake(self, report: SyncReport) -> None:
         if not getattr(self.t, "secure_link", False) and not self.allow_insecure:
             raise InsecureLink("refusing to AUTH/ACK over a link that is not a bonded LESC BLE link or the "
-                               "wired dock (see SYNC-PROTOCOL.md section 8)")
+                               "wired USB link (see SYNC-PROTOCOL.md section 8)")
         _, info, _ = self._call(pack(T.HELLO, PROTO_VERSION, self.t.max_frame), T.INFO)
         (_, dev_id, boot_id, _mono, _utc, key_fp, _oldest, _next, dropped, _mf, _free, challenge) = info
         self.device_id, report.device_id, report.boot_id = dev_id.hex(), dev_id.hex(), boot_id

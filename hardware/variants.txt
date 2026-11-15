@@ -1,10 +1,11 @@
 # Eagle Capsule CAD variants to verify. One combination per line, as OpenSCAD -D
 # assignments (each one becomes `-D <assignment>`); `#` starts a comment.
 # Every line must render capsule.scad parts interference (empty), body, lid, bezel (the eagle
-# plate unless bezel_style="flush") and pegs,
-# and dock.scad part dock, without an assertion failure. See hardware/README.md.
+# plate unless bezel_style="flush"), pegs, usb_plug (dust cap) and gasket, and dock.scad part
+# stand, without an assertion failure. See hardware/README.md.
+# Defaults: battery="600", mic="im73d122", preset="default", bezel_style="eagle".
 
-# --- every battery x storage x board, default preset ---
+# --- every battery x storage x board, default preset (IM73D122 mic board) ---
 battery="400" storage="pololu_sd" board="nrf52840" preset="default"
 battery="400" storage="sd_nand" board="nrf52840" preset="default"
 battery="400" storage="pololu_sd" board="nrf54lm20a" preset="default"
@@ -18,27 +19,46 @@ battery="1100" storage="sd_nand" board="nrf52840" preset="default"
 battery="1100" storage="pololu_sd" board="nrf54lm20a" preset="default"
 battery="1100" storage="sd_nand" board="nrf54lm20a" preset="default"
 
-# --- slim preset ---
+# --- slim preset (thin bezel, flatter back; the USB-C port stays) ---
 battery="400" storage="pololu_sd" board="nrf52840" preset="slim"
-battery="400" storage="sd_nand" board="nrf52840" preset="slim"
-battery="1100" storage="pololu_sd" board="nrf52840" preset="slim"
-battery="1100" storage="sd_nand" board="nrf52840" preset="slim"
 battery="400" storage="sd_nand" board="nrf54lm20a" preset="slim"
+battery="600" storage="pololu_sd" board="nrf52840" preset="slim"
+battery="600" storage="sd_nand" board="nrf52840" preset="slim"
+battery="600" storage="pololu_sd" board="nrf54lm20a" preset="slim"
 battery="600" storage="sd_nand" board="nrf54lm20a" preset="slim"
+battery="1100" storage="pololu_sd" board="nrf52840" preset="slim"
+battery="1100" storage="sd_nand" board="nrf54lm20a" preset="slim"
 
-# --- optional skin pad (changes the body and the dock seat only when true) ---
-battery="400" storage="pololu_sd" board="nrf52840" preset="default" skin_pad=true
-battery="400" storage="pololu_sd" board="nrf52840" preset="slim" skin_pad=true
-
-# --- front plate: bezel_style="eagle" (the default, so every line above has it) vs "flush" ---
-battery="400" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="eagle"
+# --- flush bezel instead of the eagle plate (the stand seat changes with it) ---
 battery="400" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="flush"
-battery="400" storage="pololu_sd" board="nrf52840" preset="slim" bezel_style="eagle"
-battery="400" storage="pololu_sd" board="nrf52840" preset="slim" bezel_style="flush"
-battery="1100" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="eagle"
-battery="1100" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="flush"
-battery="400" storage="sd_nand" board="nrf54lm20a" preset="default" bezel_style="eagle"
-battery="1100" storage="sd_nand" board="nrf54lm20a" preset="slim" bezel_style="eagle"
+battery="400" storage="sd_nand" board="nrf54lm20a" preset="default" bezel_style="flush"
+battery="600" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="flush"
 battery="600" storage="sd_nand" board="nrf54lm20a" preset="default" bezel_style="flush"
-# the 1100 mAh pebble is 9 mm wider; a wider span keeps the wings in proportion (15.8 mm overhang)
+battery="600" storage="pololu_sd" board="nrf52840" preset="slim" bezel_style="flush"
+battery="1100" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="flush"
+battery="1100" storage="sd_nand" board="nrf54lm20a" preset="default" bezel_style="flush"
+
+# --- mic="onboard": the XIAO's own mic (ring gasket on the nRF52840, foam pad on the nRF54LM20A) ---
+battery="400" storage="pololu_sd" board="nrf52840" preset="default" mic="onboard"
+battery="400" storage="sd_nand" board="nrf52840" preset="default" mic="onboard"
+battery="400" storage="pololu_sd" board="nrf54lm20a" preset="default" mic="onboard"
+battery="400" storage="sd_nand" board="nrf54lm20a" preset="default" mic="onboard"
+battery="600" storage="pololu_sd" board="nrf52840" preset="default" mic="onboard"
+battery="600" storage="sd_nand" board="nrf52840" preset="default" mic="onboard"
+battery="600" storage="pololu_sd" board="nrf54lm20a" preset="default" mic="onboard"
+battery="600" storage="sd_nand" board="nrf54lm20a" preset="default" mic="onboard"
+battery="1100" storage="pololu_sd" board="nrf52840" preset="default" mic="onboard"
+battery="1100" storage="sd_nand" board="nrf52840" preset="default" mic="onboard"
+battery="1100" storage="pololu_sd" board="nrf54lm20a" preset="default" mic="onboard"
+battery="1100" storage="sd_nand" board="nrf54lm20a" preset="default" mic="onboard"
+
+# --- optional skin pad (changes the body and the stand seat only when true) ---
+battery="600" storage="pololu_sd" board="nrf52840" preset="default" skin_pad=true
+battery="600" storage="pololu_sd" board="nrf52840" preset="slim" skin_pad=true
+
+# --- other options: the USB-C port moves to the left wall, snap lid (no bosses), wider span on 1100 ---
+battery="600" storage="pololu_sd" board="nrf52840" preset="default" antenna_at="usb_end"
+battery="400" storage="sd_nand" board="nrf52840" preset="default" antenna_at="usb_end" mic="onboard"
+battery="600" storage="pololu_sd" board="nrf52840" preset="default" lid_fastening="snap"
+# the 1100 mAh pebble is 5 mm wider than 600; a wider span keeps the wings in proportion
 battery="1100" storage="pololu_sd" board="nrf52840" preset="default" bezel_style="eagle" wing_span=78
