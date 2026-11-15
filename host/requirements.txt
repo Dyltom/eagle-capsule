@@ -1,0 +1,5 @@
+cryptography>=41
+pytest>=7          # optional: the tests also run with `python -m unittest`
+# Optional, detected at runtime:
+# opuslib          # real Opus in the simulator (also needs the libopus shared library)
+# faster-whisper   # local transcription (python -m eagle_host.demo --whisper)
