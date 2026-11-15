@@ -5,12 +5,12 @@ chunks carry raw 16-bit PCM. Everything downstream only sees `codec` + `frames`.
 """
 from __future__ import annotations
 
+import io
 import math
 import random
 import struct
 import wave
 from array import array
-from pathlib import Path
 
 from .chunkfile import CODEC_OPUS, CODEC_PCM_S16LE
 
@@ -93,14 +93,16 @@ def frames_to_pcm(codec: int, frames: list[bytes], rate: int, frame_ms: int) -> 
     return None
 
 
-def write_wav(path: Path, pcm: bytes, rate: int) -> None:
-    with wave.open(str(path), "wb") as w:
+def wav_bytes(pcm: bytes, rate: int) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(rate)
         w.writeframes(pcm)
+    return buf.getvalue()
 
 
-def write_frames(path: Path, frames: list[bytes]) -> None:
+def frames_blob(frames: list[bytes]) -> bytes:
     """Fallback when Opus can't be decoded on this host: length-prefixed packets."""
-    path.write_bytes(b"".join(struct.pack("<H", len(f)) + f for f in frames))
+    return b"".join(struct.pack("<H", len(f)) + f for f in frames)

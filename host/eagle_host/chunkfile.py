@@ -63,6 +63,7 @@ class ChunkMeta:
 class Chunk:
     meta: ChunkMeta
     frames: list[bytes]
+    eph_pub: bytes = b""
 
 
 # ---------------------------------------------------------------- keys
@@ -132,9 +133,11 @@ def decode_plaintext(buf: bytes) -> Chunk:
 
 # ---------------------------------------------------------------- seal / open
 
-def seal(meta: ChunkMeta, frames: list[bytes], host_pub: bytes) -> bytes:
-    """Device side. One-shot here; firmware does the same thing streaming (GCM is incremental)."""
-    eph = X25519PrivateKey.generate()
+def seal(meta: ChunkMeta, frames: list[bytes], host_pub: bytes, eph: X25519PrivateKey | None = None) -> bytes:
+    """Device side. One-shot here; firmware does the same thing streaming (GCM is incremental).
+
+    `eph` exists only so tests can simulate a broken TRNG (ephemeral key reuse)."""
+    eph = eph or X25519PrivateKey.generate()
     eph_pub = raw_public(eph)
     key_nonce = _hkdf(eph.exchange(X25519PublicKey.from_public_bytes(host_pub)),
                       eph_pub + host_pub, CHUNK_INFO, 44)
@@ -167,4 +170,5 @@ def open_chunk(blob: bytes, host_key: X25519PrivateKey) -> Chunk:
     chunk = decode_plaintext(plain)
     if chunk.meta.seq != seq:
         raise ChunkError("inner/outer sequence mismatch")
+    chunk.eph_pub = eph_pub
     return chunk

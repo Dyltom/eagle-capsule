@@ -15,11 +15,11 @@ Related docs:
   consistent with it unless noted.
 
 > **Reconciled with [SYNC-PROTOCOL.md](SYNC-PROTOCOL.md) (the source of truth for the chunk format and crypto, backed by the tested host code):**
-> - **Encryption** is a fresh X25519 key per chunk → HKDF → AES-256-GCM. The CC310 accelerates X25519, SHA-256, the random number generator and ChaCha20-Poly1305, but has **no GCM**. AES-256-GCM in software costs <1% CPU at these rates. ChaCha20-Poly1305 is reserved as a hardware-accelerated alternative algorithm.
-> - **Chunk layout:** the header is written first and the end-of-chunk fields go in a trailer, so the device streams encrypt-and-hash and never holds a chunk in RAM.
-> - **Power-cut loss:** to lose ≤4 KB instead of a whole chunk, seal each chunk in ~4 KB authenticated segments. This is an open item in SYNC-PROTOCOL.md, to be done before the firmware is frozen.
-> - **The on-SD layout (raw ring, section 8) is internal to the device.** The protocol only sees chunk sequence numbers, so the raw ring and the protocol are compatible.
-> - **The time-quality, end-time and privacy-marker fields** live in the chunk header's flags/reserved bytes. SYNC-PROTOCOL.md is to be extended when the firmware milestone M8 lands.
+> - **Encryption** is a fresh X25519 key per chunk → HKDF → AES-256-GCM. The CC310 accelerates X25519, SHA-256/HMAC and the random number generator. It has **no AES-256 and no GCM** (128-bit AES keys only), so AES-256-GCM runs in software, at <1% CPU at these rates. ChaCha20-Poly1305 (`alg = 2`) is reserved as an alternative; see SYNC-PROTOCOL.md §6.4 for why it is not a drop-in hardware path.
+> - **Chunk layout:** one chunk = one 60 s raw-ring slot (section 8). The header is written first, audio is encrypted and hashed as it streams, the trailer and GCM tag go last, then a slot-commit record. The device never holds a chunk in RAM.
+> - **Power-cut loss (decided for v1):** a chunk is sealed as a whole, so an unclean power-off loses the open chunk, **≤ 60 s**. Firmware closes the chunk early on a low-VBAT warning to make that rare. Sealing in ~4 KB segments (lose ≤ ~1.4 s) is a **v2 format** change in SYNC-PROTOCOL.md §8, not a blocker for freezing v1 firmware; the reference host does not parse segments.
+> - **The on-SD layout (raw ring, section 8) is internal to the device.** The protocol only sees `seq`, size and SHA-256, so the raw ring and the protocol are compatible.
+> - **Extra chunk metadata** (state tags, after-privacy marker, close reason, level stats) is **inside the ciphertext only**, never in the cleartext outer header. What v1 can carry today and what waits for v2 is defined in SYNC-PROTOCOL.md §3.
 
 
 Anything marked **ESTIMATE** must be replaced with a bench measurement
@@ -73,9 +73,9 @@ Anything marked **ESTIMATE** must be replaced with a bench measurement
  encoded-frame queue (16 KB, about 5 s at 24 kbps)
    |
    v
- [storage thread, prio 4]  pack frames -> 4 KB pages -> AES-256-GCM (software; CC310 has no GCM)
-   |                       -> double-buffered 4 KB writes -> raw ring on SD (section 8)
-   |                       -> chunk commit (header written last)
+ [storage thread, prio 4]  OUTER header first, then frames -> AES-256-GCM (software) + SHA-256 (CC310)
+   |                       -> double-buffered 4 KB writes into the chunk's 256 KiB slot (section 8)
+   |                       -> trailer + GCM tag last -> slot-commit record (seq, size, sha256)
    v
  microSD over SPI2 @ 8 MHz
                                   [sync thread, prio 6]  list/fetch/ack over
@@ -95,22 +95,25 @@ Why it is shaped this way:
 - **Opus settings (start):** Omi's proven setup: `OPUS_APPLICATION_RESTRICTED_LOWDELAY`
   (CELT only), complexity 3, VBR, 16 kHz mono, `SIGNAL_VOICE`. Two deliberate
   changes to evaluate on the bench:
-  - **Bitrate 24 kbps** instead of Omi's 32 kbps. At 32 kbps, a full day is
-    346 MB and syncs in 2.4 h at 40 KB/s, or **6.4 h at 15 KB/s** (the
-    Windows-BLE worst case in `feasibility.py`), which nearly fills the dock
-    window. 24 kbps cuts that by 25%. Choose the final value by Whisper word
-    error rate on our own recordings at 16/24/32 kbps. Note that `feasibility.py`
-    currently assumes 16 kbps.
+  - **Bitrate 24 kbps** instead of Omi's 32 kbps. A full day is 259 MB at 24 kbps
+    and 346 MB at 32 kbps (`feasibility.py`). Over the dock UART (~90 KB/s) that is
+    ~0.8 h / ~1.1 h. Over BLE it is ~1.8 h at the unmeasured 40 KB/s estimate, but
+    **~14 h / ~19 h at the 5 KB/s Boswell measured** on this board, longer than the
+    night. That is why the dock UART is the primary path. 24 kbps cuts every figure by
+    25%. Choose the final value by Whisper word error rate on our own recordings at
+    16/24/32 kbps. `feasibility.py` models 24 (typical) and 32 kbps (`--worst`).
   - **20 ms frames** instead of 10 ms. Latency doesn't matter for storage, and 20 ms CELT
     frames give better quality per bit and halve per-frame overhead (TOC byte,
     length prefix).
 - **The storage thread is not real-time.** SD cards stall for 100-500 ms (rarely more)
   during internal garbage collection. That stall is absorbed by the 16 KB encoded
   queue (about 5 s at 24 kbps), not by the PCM ring.
-- **Encryption runs in the storage thread** on 4 KB pages using the nRF52840
-  CryptoCell-310 AES engine through PSA Crypto. At about 3 KB/s of audio, the cost is
-  negligible. X25519 runs once per chunk (a fresh ephemeral key per chunk, as SYNC-PROTOCOL.md
-  defines) and takes a few ms in software. **ESTIMATE**: measure in M8.
+- **Encryption runs in the storage thread**, streaming, through PSA Crypto. AES-256-GCM
+  is **software** (nrf_oberon / Mbed TLS): the CC310 handles only 128-bit AES keys and has
+  no GCM. At about 3 KB/s of audio that is <1% CPU. The CC310 does the SHA-256 of the
+  stored bytes (for LIST) and the X25519 work: two operations per chunk (ephemeral keygen +
+  ECDH, once a minute) plus one or two per sync session, a few ms each on the CC310 vs
+  tens of ms in software. **ESTIMATE**: measure in M8 (T13).
 
 ### CPU load (ESTIMATE until M5)
 
@@ -139,16 +142,16 @@ it on the PPK2's digital channel together with current.
 | PDM DMA buffers 2 × 1600 × int16 | 6.4 | Same as Omi. |
 | PCM ring (0.5 s) | 16 | Omi uses 1 s (32 KB). We halve it. |
 | Opus encoder state (CELT) | 7.2 | `OPUS_ENCODER_SIZE 7180` in Omi's `codec.c` (hybrid mode would need 10.9). |
-| Codec thread stack | 16-24 | Omi allocates **32 KB**. Opus uses the stack for scratch. Measure the high-water mark with `CONFIG_THREAD_ANALYZER` and trim. |
+| Codec thread stack | 24 | Omi allocates **32 KB**. Boswell overflowed a smaller stack and measured a **17,944 B high-water mark** for Opus on this board, so start at 24 KB. Confirm with `CONFIG_THREAD_ANALYZER` before trimming. |
 | Encoded-frame queue | 16 | Absorbs SD stalls. |
-| Storage page buffers (2 × 4 KB) + GCM context | 9 | |
+| Storage page buffers (2 × 4 KB) + GCM and SHA-256 contexts | 9 | |
 | Sync read/transmit buffers | 4-8 | |
 | PSA crypto / mbedTLS heap | 8-16 | |
 | Other stacks (main, storage, sync, supervisor, sysworkq, BT RX, ISR, idle) | ~24 | |
 | mcumgr / SMP buffers | 4-6 | |
 | Kernel, drivers, settings/NVS cache, misc | ~8 | |
 | USB CDC console (bench builds only) | 0 / 8 | Off in production. |
-| **Total** | **~150-185** | **~70-100 KB headroom.** RAM is not a risk. |
+| **Total** | **~157-189** | Sum of the lines above: low 156.6, high 188.6 (bench build with USB CDC); production high ~181. **~67-99 KB headroom** (~75 KB at the production high end). RAM is not a risk, and an optional ~14 KB per-slot ACK cache (section 8) still fits. |
 
 ### Flash: 1 MB internal + 2 MB QSPI
 
@@ -182,14 +185,30 @@ Layout decision:
 
 ### States
 
-| State | Entered when | Audio | Radio | Notes |
-|---|---|---|---|---|
-| WORN | VBUS absent, IMU shows motion within the last N min | recording | BLE off, or very slow advertising | the normal day |
-| STILL | VBUS absent, no motion for > 10 min | recording, tagged `still` | as WORN | probably left on a table; optionally drop to a lower bitrate |
-| DOCKED | `USBDETECTED` (VBUS present) | recording (sleep audio), tagged `docked` | advertising + sync, UART enabled | charging at 100 mA |
-| PRIVACY | switch D5 HIGH | **mic unpowered (P1.10 LOW), PDM stopped** | unchanged | chunk closed with a `privacy_start` marker |
-| LOW_BATT | VBAT < 3.50 V off dock | recording | radio off | LED warning |
-| OFF | VBAT < 3.40 V, or a "storage mode" command | none | none | close the chunk, persist state, **System OFF**; wakes on VBUS (USB detect) or the D5 GPIO |
+| State | Entered when | Audio | Radio | Indicator LED (D3) | Notes |
+|---|---|---|---|---|---|
+| WORN | VBUS absent, IMU shows motion within the last N min | recording | BLE off; an on-demand window only after the pull gesture (below) | **on (slow blink), required** | the normal day |
+| STILL | VBUS absent, no motion for > 10 min | recording, tagged `still` | as WORN | **on (slow blink), required** | probably left on a table; optionally drop to a lower bitrate |
+| DOCKED | `USBDETECTED` (VBUS present) | recording (sleep audio), tagged `docked` | UART enabled and sync over it (primary). BLE advertises only as the fallback when no UART host sends HELLO within ~60 s of docking | may be dimmed or off (configurable) | charging at 100 mA |
+| PRIVACY | switch D5 HIGH | **firmware drives mic power P1.10 LOW, PDM stopped** | unchanged | off | open chunk closed; the next chunk is flagged `after_privacy` (SYNC-PROTOCOL.md §3) |
+| LOW_BATT | VBAT < 3.50 V off dock | recording | radio off | warning pattern (still visibly on) | |
+| OFF | VBAT < 3.40 V, or a "storage mode" command | none | none | off | close the chunk, persist state, **System OFF**; wakes on VBUS (USB detect) or the D5 GPIO |
+
+**Indicator rule:** the LED is on whenever the capsule records off the dock (WORN, STILL,
+LOW_BATT). It may be dimmed or turned off only in DOCKED (WIRING.md §5, LEGAL.md). The
+supervisor drives it from the state. If the supervisor stalls, it stops feeding the
+watchdog and the device resets (section 9).
+
+**Privacy switch:** it is **firmware-enforced**. D5 is read by firmware, which stops
+PDM and drives the mic's power line (P1.10) LOW. It is not a hardware kill (WIRING.md §4).
+
+**On-demand BLE pull gesture.** There is no button. Flick the switch
+**privacy → record → privacy → record within 3 s** (each position held ≥ 100 ms after
+debounce). The supervisor then advertises for 2 min, connectable only by the bonded host,
+and acknowledges with a double LED blink. Each pass through privacy really cuts the mic
+and closes a chunk, so the gesture costs ~1-3 s of audio and two short chunks. An IMU
+double-tap (the LSM6DS3TR-C's embedded tap detection on INT1) is the alternative if the
+switch pattern proves awkward; it costs no audio but needs the accelerometer awake.
 
 ### Dock detection via VBUS
 
@@ -197,9 +216,10 @@ The XIAO's 5V pin is the nRF52840's VBUS (WIRING.md section 3), so the POWER per
 raises `USBDETECTED` / `USBREMOVED` with nothing extra wired. Use
 `nrfx_power` USB events, or poll `nrf_power_usbregstatus_vbusdet_get()` from the
 supervisor. Debounce for 500 ms, because pogo contacts bounce as the magnet seats.
-On dock: drive P0.13 LOW, enable `uart0` on D6/D7, start advertising.
+On dock: drive P0.13 LOW, enable `uart0` on D6/D7, wait for a UART HELLO, and start
+BLE advertising only if none arrives (fallback).
 On undock: disable `uart0` and set D6/D7 to disconnected inputs (no driven voltage on
-exposed contacts), stop advertising.
+exposed contacts), stop advertising, and turn the indicator back on.
 A dock and a PC USB cable look the same on VBUS. If that matters, tell them apart by
 whether USB enumeration happens or the dock bridge answers on UART.
 
@@ -219,8 +239,8 @@ node. Consequences and rules:
    while the charger is still in CC. Use **0 dBm TX on the dock** (the PC is close;
    6.4 mA vs 16.4 mA peak at +8 dBm). Use long connection intervals
    once the bulk transfer is done.
-3. **Timer budget.** About 55 mAh used per 16 h day (`feasibility.py`) refills in well
-   under 2 h at 100 mA, far inside the 10 h fast-charge timer (which is extended
+3. **Timer budget.** A 16 h day off the dock uses about 50 mAh typical, 122 mAh worst
+   (`feasibility.py`), which refills in ~0.7-2.1 h at 100 mA, far inside the 10 h fast-charge timer (which is extended
    during DPM/thermal regulation). The precharge timer (30 min) only matters for
    a deeply flat cell.
 4. **Recharge cycling.** After termination, the recording load drains the cell until the
@@ -243,15 +263,25 @@ curve table measured on our cell (M16).
   The PC sets the anchor on every sync (the time-set message is in SYNC-PROTOCOL.md).
   The PC can also correct drift after the fact by interpolating between two
   consecutive anchors.
-- **Survive resets:** keep the anchor, `boot_id`, and a last-seen uptime in a
-  **`__noinit` RAM block with a CRC**. nRF52 RAM is retained through watchdog and
-  soft resets, but not through a power-on reset or brownout. Also persist the
-  anchor to NVS on every time-set. On boot:
-  valid retained block → time continues, quality `derived`;
-  NVS only → time unknown until the next sync, quality `unknown`, and the PC fixes it
-  afterwards using `boot_id` + uptime.
-- Every chunk header carries `boot_id`, `uptime_ms` at start and end, the wall-clock
-  estimate and its quality flag (field layout in SYNC-PROTOCOL.md).
+- **New `boot_id` on every reset.** Every boot, including a watchdog or soft reset,
+  draws a fresh `boot_id` from the TRNG, and uptime restarts at 0 with it, so
+  `(boot_id, uptime_ms)` never repeats (SYNC-PROTOCOL.md §1). `boot_id` is never
+  retained across a reset.
+- **Time does not survive a reset in v1.** After any reset the device's UTC is unknown
+  (`start_utc_ms = 0`) until the next `SET_TIME`. The host then places the new boot's
+  chunks from that sync's anchor (SYNC-PROTOCOL.md §7 rule 2). Chunks are undated only
+  if the device resets again before syncing. The firmware sets `start_utc_ms` only from
+  a `SET_TIME` received in the **current** boot, because the v1 host trusts any non-zero
+  value as device time.
+- **Retained hint (optional, separate from `boot_id`):** a **`__noinit` RAM block with a
+  CRC** holds `prev_boot_id`, the last anchor and a last-seen uptime. nRF52 RAM is
+  retained through watchdog and soft resets, but not through a power-on reset or
+  brownout. It lets a later format record "this boot followed `prev_boot_id` at roughly
+  this offset" (a v2 trailer field, SYNC-PROTOCOL.md §3) so the host can bound otherwise
+  undated chunks. It never re-uses the old `boot_id` and never sets `start_utc_ms`.
+- Every chunk carries, inside the ciphertext, `boot_id`, `start_mono_ms`, `start_utc_ms`
+  (0 = unknown) and `duration_ms`, so the end uptime is `start_mono_ms + duration_ms`
+  (field layout in SYNC-PROTOCOL.md §3).
 
 ---
 
@@ -259,16 +289,20 @@ curve table measured on our cell (M16).
 
 | Option | Pros | Cons |
 |---|---|---|
-| **A. No device VAD; store everything** (recommended) | No lost speech onsets, whispers, or quiet sleep-talk and snoring, which an energy gate will clip. Silero VAD on the PC is far better than anything that fits here, and it can be re-run when the models improve. No tuning in the field. | More storage and sync time. That is cheap: 32 GB holds about **120 days at 24 kbps**. |
+| **A. No device VAD; store everything** (recommended) | No lost speech onsets, whispers, or quiet sleep-talk and snoring, which an energy gate will clip. Silero VAD on the PC is far better than anything that fits here, and it can be re-run when the models improve. No tuning in the field. | More storage and sync time. That is cheap: 32 GB holds about **80 days** in fixed 256 KiB slots (section 8), whatever the bitrate. |
 | B. Energy VAD gates recording on the device | Less data and less sync time | Irreversible: dropped audio is gone. Thresholds depend on noise floor, clothing rub and the dock environment. |
 | C. Opus DTX | Built into Opus | Mostly effective in SILK/VOIP mode. With CELT-only restricted-low-delay in Opus 1.2.1, its benefit is doubtful. **VERIFY** before relying on it. |
 
 **Decision: A, plus cheap device-side metadata.** The codec thread computes,
 per frame, RMS energy and a running noise-floor estimate (minimum tracker with
-slow rise). It writes per-chunk summaries into the chunk header: speech-likely
-fraction, peak level and noise floor. The PC can then
-**prioritise fetching speech-heavy chunks first** and run Silero on everything later.
-An optional later step: drop to 8-12 kbps after more than 30 s of deep silence
+slow rise). v1 writes a per-second speech-likely bitmap into the encrypted trailer
+(SYNC-PROTOCOL.md §3; the host turns it into `speech_ratio`). Peak level and noise
+floor wait for the v2 trailer extension. All of it is inside the ciphertext, so the
+device and the host see it only after decryption.
+**No speech-first fetch in v1** (former M15 dropped): the VAD data is encrypted and
+LIST_ITEM carries only `seq`, size and SHA-256, so the host cannot rank chunks before
+fetching them, and the dock UART moves a whole day in ~1 h anyway. The host runs
+Silero on everything. An optional later step: drop to 8-12 kbps after more than 30 s of deep silence
 (reversible, audio kept), never a gate.
 
 ---
@@ -312,31 +346,49 @@ Keep FAT only for the Omi bench test (M1).
 ### Layout (raw LBAs via Zephyr `disk_access_*` on the `SD` disk)
 
 ```
- LBA 0      Superblock A  (magic, layout version, device id, slot size, slot count, format UUID, CRC)
+ LBA 0      Superblock A  (magic, layout version, device_id, slot size = 256 KiB, slot count, format UUID, CRC)
  LBA 8      Superblock B  (identical copy)
- LBA 16..   Metadata log  (e.g. 256 x 4 KB records; each: seq, ack watermark,
-                           head hint, counters, CRC; newest valid record wins)
- LBA M..    Data slots    (N fixed-size slots, e.g. 64 KiB = 128 sectors each)
-            slot = [header sector][page 1]...[page k]   (k <= 127)
+ LBA 16..   Metadata log  (e.g. 256 x 4 KB records; each: head hint, lowest-unACKed hint,
+                           `dropped`, next seq, CRC; newest valid record wins)
+ LBA C..    Commit table  (one 512 B sector per slot, at C + slot index:
+                           seq, size, sha256, boot_id, acked flag, CRC)
+ LBA S..    Data slots    (N x 256 KiB = 512 sectors each; one chunk per slot)
+            slot = [OUTER header | ciphertext, streamed in 4 KB writes ... | trailer | GCM tag | unused tail]
 ```
 
-- **One chunk per slot.** Slot size is matched to the chunk size in
-  SYNC-PROTOCOL.md. 64 KiB is about 22 s at 24 kbps, so a brownout loses at most about 22 s.
-- **Commit protocol:** write the payload pages first, as 4 KB aligned multi-block writes,
-  then the **header sector last** (sequence number, length, timestamps, VAD stats,
-  CRC). A slot whose header has a valid CRC and a higher sequence number than the
-  previous one is committed. Otherwise it is free or torn.
-- **Early close:** the chunk is closed short (with the header recording the actual length)
-  on privacy, dock/undock, low battery and a time-set, so state changes are chunk
-  boundaries.
-- **Boot recovery:** read the newest metadata record → scan forward from the
-  head hint until the sequence breaks → that is the head. A torn slot just after
+- **One chunk = one slot = 60 s.** A slot is 256 KiB (262,144 B). A 60 s chunk at
+  32 kbps is 240,000 B of Opus + 3,000 frames × 2 B length prefix (20 ms frames) + 2 B terminator + 44 B
+  inner header + 18 B trailer + 52 B outer header + 16 B tag ≈ **246,132 B**, leaving
+  ~16 KB (6%) for VBR overshoot. At 24 kbps it is ≈ 186,132 B. A 32 GB card
+  (~30.4 GB usable) holds ~116,000 slots, so **~80 days of ring at any bitrate**;
+  early-closed short chunks still use a whole slot, so many state changes shorten that.
+- **Write and commit order:** write the **OUTER header first**, then the ciphertext as
+  the encoder produces it (4 KB aligned multi-block writes, SHA-256 updated over the
+  bytes as stored), then the **trailer and GCM tag last**. Only then write the slot's
+  **commit record** (seq, size, SHA-256, CRC) to the commit table. A slot whose commit
+  record has a valid CRC and the expected seq is committed; anything else is free or
+  torn. LIST reads the commit table, never the audio.
+- **Early close:** the chunk is closed short (the trailer records the actual duration)
+  on privacy, dock/undock, low battery, a time-set, and when the next frame would not
+  fit in the slot, so state changes are chunk boundaries.
+- **Boot recovery:** read the newest metadata record → scan the commit table forward
+  from the head hint until the seq breaks → that is the head. A torn slot just after
   the head is logged as a gap event. This is O(few slots), not a full-card scan.
-- **Acks** advance a watermark in the metadata log. Headers are never rewritten to
-  mark them acked.
-- **When full:** overwrite the oldest slot even if it isn't acked (recording wins),
-  increment `overwritten_unacked`, and report it in the next sync.
-- **Wear:** at 24 kbps, about 260 MB/day on 32 GB means each LBA is written about 3 times a year.
+- **ACKs are per slot, not a watermark.** Out-of-order ACKs are normal: the host
+  deliberately leaves chunks it cannot verify or decrypt un-ACKed and ACKs later ones
+  (SYNC-PROTOCOL.md §4). An ACK rewrites that slot's commit record with `acked = 1`,
+  then ACK_OK is sent. A tear during that rewrite can only lose a chunk the host
+  already holds durably. LIST skips ACKed slots, starting from the lowest-unACKed hint.
+  Firmware may cache a 1-bit-per-slot bitmap in RAM (~14 KB for 32 GB) so LIST does not
+  rescan old commit records.
+- **When full:** the ring always takes the **oldest** slot next (ACKed slots are not
+  reused out of order, which keeps recovery simple). If that slot is committed and
+  not ACKed, it is overwritten anyway (recording wins), the persistent **`dropped`**
+  counter is incremented, and it is reported in INFO (SYNC-PROTOCOL.md §2).
+- **Brownout:** the open chunk has no tag and no commit record, so it is lost:
+  **≤ 60 s** per unclean power-off (decision at the top of this document; SYNC-PROTOCOL.md §8).
+- **Wear:** at 24 kbps about 270 MB is written per day, and the ring wraps every ~80
+  days, so each LBA is written about 4-5 times a year (commit records twice per wrap).
   Wear is not a concern, but use a **high-endurance/industrial microSD**: those
   handle sudden power loss better.
 - **Testing:** the ring module runs under `native_sim` against Zephyr's RAM disk,
@@ -385,7 +437,8 @@ high idle current (0.1-1 mA, varying by card brand).
    window at every boot). A bricked app that still watchdog-resets can be
    re-flashed from the dock without opening the case.
 6. Enable `CONFIG_BT_PRIVACY` (resolvable private addresses) so the capsule can't
-   be tracked by its BLE address. Advertise only when docked, or on demand.
+   be tracked by its BLE address. Advertise only as the docked fallback (no UART host) or
+   after the on-demand pull gesture (section 5).
 
 ---
 
@@ -393,7 +446,7 @@ high idle current (0.1-1 mA, varying by card brand).
 
 Omi devkit sources: `omi/firmware/devkit/` (repo root is MIT; per-folder terms
 checked). Keep their copyright notices in reused files and credit them in
-`CREDITS.md`, which another commit will update.
+`CREDITS.md`.
 
 | Omi file | Verdict | Why |
 |---|---|---|
@@ -439,7 +492,7 @@ bench build with the USB CDC console). Don't move on until a step passes.
 | T14 | Omi DK2 firmware unmodified on our wiring (switch on "record") | SD files appear, so the SPI/CS wiring is proven. |
 | T15 | Full pipeline, 24 h soak | No gaps, no resets, chunks decrypt and decode on the PC. |
 | T16 | **Current profile with the PPK2** over 10 min each: WORN-recording, PRIVACY, DOCKED+sync | Compare against `feasibility.py`. Replace the ESTIMATE lines with measured values. |
-| T17 | Fault injection: 100 random power cuts during writes; a forced thread hang; a bad DFU image | The ring always recovers with at most one torn slot; the watchdog resets with time carried over; the DFU reverts. |
+| T17 | Fault injection: 100 random power cuts during writes; a forced thread hang; a bad DFU image | The ring always recovers with at most one torn slot; the watchdog reset starts a new `boot_id` and the next sync reconciles its chunks; the DFU reverts. |
 
 **Multimeter vs PPK2:** a multimeter in series works for steady currents (charger
 CC current, a mA-level average), but its µA-range burden voltage can brown out the
@@ -462,16 +515,16 @@ check from section 11.
 | M3 | Power module: VBAT ADC, P0.13 control, `/CHG`, VBUS events | T3, T4, T5 |
 | M4 | **MCUboot via SWD + QSPI secondary slot + signed images + SMP over USB CDC** (all later work uses the final layout) | Upload/confirm/revert works on the bench. |
 | M5 | Mic + codec modules (ported from Omi), CPU/stack measured | T6, T7 |
-| M6 | Raw ring storage module + `native_sim` RAM-disk tests + power-cut fault injector | Host tests pass, then T8 |
+| M6 | Raw ring storage module (256 KiB slots, commit table, per-slot ACK, `dropped`) + `native_sim` RAM-disk tests incl. out-of-order ACKs + power-cut fault injector | Host tests pass, then T8 |
 | M7 | Pipeline PDM → Opus → plaintext chunks → ring | 1 h of audio decodes on the PC. |
-| M8 | Encryption per SYNC-PROTOCOL.md (PSA; X25519/SHA-256 on CC310) + shared test vectors with the PC tool | The PC decrypts device chunks. T13 |
-| M9 | Time base (anchor, `__noinit` retention, NVS, chunk timestamps) | Time survives a watchdog reset. |
+| M8 | Encryption per SYNC-PROTOCOL.md (PSA; X25519/SHA-256 on CC310, AES-256-GCM in software) + shared test vectors with the PC tool | The PC decrypts device chunks. T13 |
+| M9 | Time base (anchor from SET_TIME, chunk timestamps, optional `__noinit` prev-boot hint) | After a watchdog reset: new `boot_id`, `start_utc_ms = 0` until the next sync, and the host dates those chunks from that sync's anchor. |
 | M10 | Supervisor + watchdog check-ins + crash-loop safe mode | T17 (hang part) |
-| M11 | Privacy switch + mic power gating + LED | T10. The mic draws 0 mA in privacy. |
-| M12 | BLE sync service (list/fetch/ack) per SYNC-PROTOCOL.md + PC bleak client | T12. A full day syncs within the dock window. |
-| M13 | Dock: VBUS state machine, UART transport (sync + SMP), charge-rate rules | T11. Charging terminates after a sync. |
+| M11 | Firmware-enforced privacy switch (P1.10 LOW) + indicator LED rule + switch-flick pull gesture | T10. The mic draws 0 mA in privacy; the LED is on in every off-dock recording state. |
+| M12 | BLE sync service (list/fetch/ack) per SYNC-PROTOCOL.md + PC bleak client | T12. On-demand pull (gesture) and docked fallback work. A full day over BLE is not expected to fit the night at the measured 5 KB/s; that is M13's job. |
+| M13 | Dock: VBUS state machine, UART transport (sync + SMP), charge-rate rules | T11. A full day syncs over the UART in < 2 h. Charging terminates after a sync. |
 | M14 | IMU low-power helper + WORN/STILL state + chunk tags | T9 |
-| M15 | VAD stats in chunk headers + PC-side fetch prioritisation | Speech-heavy chunks are fetched first. |
+| M15 | **Dropped for v1.** (Was: VAD-prioritised fetch.) The VAD data is inside the ciphertext and LIST_ITEM has only seq/size/sha256, and the dock UART makes it unnecessary. The per-second VAD bitmap is part of M7/M8. | n/a |
 | M16 | LOW_BATT / System OFF / storage mode, battery curve, power optimisation pass | T16 meets the `feasibility.py` budget. |
 | M17 | MCUboot serial recovery on the dock UART + BLE SMP with bonded auth | Rescue a deliberately bricked app from the dock. |
 | M18 | **Seal**: 72 h soak, T17 fault-injection, an over-the-air DFU on the sealed unit | All pass. |
@@ -488,8 +541,9 @@ check from section 11.
 3. **Charge termination vs. sync load** (no power-path): a sync drawing more than 10 mA
    while full can stop termination until the 10 h timer runs out. **Mitigation:** sync early,
    0 dBm, 100 mA charge.
-4. **Sync time at 32 kbps** over Windows BLE (about 6.4 h worst case). **Mitigation:**
-   24 kbps, the dock UART, and VAD-prioritised fetch.
+4. **Sync time over BLE**: at the 5 KB/s Boswell measured, a full day takes ~14 h at
+   24 kbps and ~19 h at 32 kbps, longer than the night. **Mitigation:** the dock UART is
+   the primary path (~0.8-1.1 h); BLE is the docked fallback and for on-demand pulls.
 5. **Omi's 24 MHz SPI request is really 8 MHz** (SPIM2). That is harmless, but don't plan on more.
 6. **The IMU is powered at boot** by the Zephyr board DTS, which costs about 1 mA unless it is handled.
 7. **Pin overlap with Omi DK2 firmware** (I2S on D1-D3, D5 long-press = power off).

@@ -5,29 +5,19 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import time
 from pathlib import Path
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-
 from .chunkfile import raw_public
 from .client import SyncClient
+from .keys import PASSPHRASE_ENV, load_or_create_key
 from .protocol import LoopbackTransport
 from .simulator import FakeDevice
 from .transcribe import StubTranscriber, default_transcriber
 
-
-def load_or_create_key(path: Path) -> X25519PrivateKey:
-    """Demo only: an unencrypted PEM. On a real host protect it (passphrase, DPAPI, keyring)."""
-    if path.exists():
-        return serialization.load_pem_private_key(path.read_bytes(), password=None)
-    key = X25519PrivateKey.generate()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                                       serialization.NoEncryption()))
-    path.with_suffix(".pub").write_bytes(raw_public(key))   # this 32-byte file is what gets flashed
-    return key
+__all__ = ["load_or_create_key", "main"]
 
 
 def main() -> None:
@@ -43,6 +33,10 @@ def main() -> None:
     ap.add_argument("--whisper", action="store_true", help="use faster-whisper if installed")
     a = ap.parse_args()
 
+    os.umask(0o077)
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    if not os.environ.get(PASSPHRASE_ENV) and not (a.out / "host_key.pem").exists():
+        print(f"note: ${PASSPHRASE_ENV} is not set, so host_key.pem is stored unencrypted (still owner-only)")
     key = load_or_create_key(a.out / "host_key.pem")
     started = int(time.time() * 1000) - (a.chunks * a.chunk_seconds + 30) * 1000   # so the sync ends "now"
     dev = FakeDevice(raw_public(key), chunk_seconds=a.chunk_seconds, sample_rate=a.rate, codec=a.codec,
@@ -60,7 +54,8 @@ def main() -> None:
         r = client.sync()
         client.close()
         print(f"sync #{attempt} over {mode}: imported {r.imported}, resumed {r.resumed_bytes} B, "
-              f"hash_failed {r.hash_failed}, decrypt_failed {r.decrypt_failed}, interrupted {r.interrupted}")
+              f"hash_failed {r.hash_failed}, decrypt_failed {r.decrypt_failed}, failed {r.failed}, "
+              f"interrupted {r.interrupted}")
         if not r.interrupted:
             break
     for day in r.days:

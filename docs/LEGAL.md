@@ -11,9 +11,20 @@ lawyer, before wearing this around other people.
   colleague's phone call, your housemates in the next room) is an offence **in
   every state and territory**.
 - In **NSW, WA, SA, TAS and the ACT**, even if you are *in* the conversation, you
-  generally need **every party's consent**. The exceptions are narrow (e.g.
-  "reasonably necessary to protect your lawful interests"), and routine
-  life-logging is not one of them.
+  generally need **every party's consent**, unless a narrow exception applies.
+- **NSW in detail** (*Surveillance Devices Act 2007*, s 7(3)(b)): a party to the
+  conversation may record it without the others' consent only if **either**
+  (i) the recording is reasonably necessary to protect that party's lawful
+  interests, **or** (ii) it is not made for the purpose of communicating or
+  publishing the conversation, or a report of it, to people who weren't parties.
+  Limb (ii) reads as if a private memory aid could fit, but treat both limbs as
+  narrow: whether an always-on personal archive is "not made for the purpose of
+  communicating" is untested, it covers only conversations you're part of, and
+  sharing a clip or transcript later is a separate offence (s 11) with its own
+  narrow exceptions. The advice doesn't change: get consent, or pause. Maximum penalty for an individual: 100 penalty units
+  or 5 years' imprisonment, or both (500 penalty units for a corporation), per
+  secondary legal summaries; we couldn't load the official text to check it.
+  We haven't checked whether the TAS or ACT Acts have a similar limb.
 - In **VIC, QLD and the NT**, a party may record a conversation they are part of,
   but **sharing or publishing** it is still restricted.
 - A "private conversation" can happen in public. A quiet chat in a café still
@@ -38,12 +49,19 @@ lawyer, before wearing this around other people.
 
 ## How this shapes the design (non-negotiable features)
 
-1. **A hardware pause.** The slide switch cuts recording in hardware (it gates
-   the mic and is read by the firmware), so you can flick it off when you walk
-   into a meeting, a shop or a friend's house. Off really means off.
-2. **A visible indicator.** An optional low-brightness LED, or a physical flag
-   visible when the switch is on, so people around you can tell. It also helps
-   socially.
+1. **A physical privacy switch, enforced by firmware.** Flick it when you walk
+   into a meeting, a shop or a friend's house. The switch is read by the firmware
+   (D5), which stops the PDM and drives the mic's power line (P1.10) LOW, so the
+   mic is unpowered, not just muted ([WIRING §4](WIRING.md)). **Limitation:** this
+   is only as good as the firmware. A bug or a malicious image could ignore the
+   switch. Signed images and owner-built firmware reduce that risk but don't
+   remove it. A switch that interrupts mic power in hardware is a possible v2
+   upgrade (it needs rework on the XIAO or a custom board).
+2. **A visible recording indicator, required whenever it records off the dock.**
+   A low-brightness LED (blinking, µA average) that is on whenever the capsule is
+   worn and recording, so people around you can tell. It also helps socially.
+   On the dock, in your own bedroom, it may be dimmed or turned off at night.
+   ([WIRING §5](WIRING.md))
 3. **Consent-friendly defaults.** A "solo mode" is the expected everyday use:
    your own voice notes, thinking out loud, sleep audio in your own room. Record
    others only when they know and agree.
@@ -54,6 +72,9 @@ lawyer, before wearing this around other people.
 ## Sources (verify current versions)
 
 - NSW: https://legislation.nsw.gov.au/view/html/inforce/current/act-2007-064
+  (s 7(3)(b) limbs as summarised by Sydney Criminal Lawyers,
+  https://www.sydneycriminallawyers.com.au/?p=8351; penalties as summarised by
+  Go To Court, https://www.gotocourt.com.au/criminal-law/nsw/listening-devices-new-south-wales/)
 - VIC: https://www.legislation.vic.gov.au/in-force/acts/surveillance-devices-act-1999
 - QLD: https://www.legislation.qld.gov.au/view/html/inforce/current/act-1971-050
 - WA: https://www.legislation.wa.gov.au

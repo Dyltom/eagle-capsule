@@ -74,14 +74,15 @@ class NormalSync(Base):
             self.assertEqual(r["time_source"], "device")
             self.assertEqual(r["start_utc_ms"], t0 + i * CHUNK_S * 1000)
             day = datetime.fromtimestamp(r["start_utc_ms"] / 1000, timezone.utc)
-            self.assertTrue(r["path"].startswith(day.strftime("%Y/%m/%d/")), r["path"])
+            self.assertTrue(r["path"].startswith(day.strftime("%Y/%m/%d/") + self.dev.device_id.hex() + "/"),
+                            r["path"])
             with wave.open(str(self.data / r["path"])) as w:
                 self.assertEqual(w.getnframes(), CHUNK_S * RATE)
             self.assertEqual(len(r["vad_bits"]), CHUNK_S)
 
         hits = self.db().execute("SELECT rowid FROM transcripts_fts WHERE transcripts_fts MATCH 'eagle'").fetchall()
         self.assertEqual(len(hits), 3)
-        rollup = self.data / rows[0]["path"].rsplit("/", 1)[0] / f"{rows[0]['day']}.md"
+        rollup = self.data / rows[0]["day"].replace("-", "/") / f"{rows[0]['day']}.md"
         self.assertIn("3 chunks", rollup.read_text())
 
     def test_ble(self) -> None:
@@ -189,7 +190,7 @@ class LostClock(Base):
         self.client(LoopbackTransport(self.dev)).sync()
         orphan = self.db().execute("SELECT * FROM chunks WHERE seq IN (5,6)").fetchall()
         self.assertTrue(all(r["time_source"] == "unknown" and r["start_utc_ms"] is None for r in orphan))
-        self.assertTrue(all(r["path"].startswith(f"undated/boot-{orphan_boot:08x}/") for r in orphan))
+        self.assertTrue(all(r["path"].startswith(f"undated/{self.dev.device_id.hex()}/boot-{orphan_boot:08x}/") for r in orphan))
         last = self.db().execute("SELECT * FROM chunks WHERE seq=7").fetchone()
         self.assertEqual((last["time_source"], last["start_utc_ms"]), ("reconciled", truth))
         self.assertTrue((self.data / "undated" / "undated.md").exists())
