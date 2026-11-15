@@ -4,7 +4,7 @@
 For each line of hardware/variants.txt (OpenSCAD -D settings, e.g.
 `battery="400" storage="pololu_sd"`), this renders the capsule's `interference`
 part (must be empty), the printable capsule parts and the stand (dock.scad), and
-prints the outer size the capsule echoes, the eagle plate size and the stand footprint.
+prints the outer size the capsule echoes, the eagle plate or crest size and the stand footprint.
 
 Usage:  python3 hardware/check_cad.py [--openscad PATH] [--keep DIR] [--jobs N]
 """
@@ -78,6 +78,7 @@ def check_variant(openscad, defs, outdir):
                 problems.append(f"{os.path.basename(scad)}:{part}: exit {rc}, "
                                 f"{'empty, ' if empty else ''}{'; '.join(bad[:3])}")
             for pat, name in ((r"EAGLE plate W x H x T = ([\d.]+ x [\d.]+ x [\d.]+)", "plate"),
+                              (r"CREST relief .*?\(([\d.]+ x [\d.]+) mm\)", "crest"),
                               (r"STAND footprint = ([\d.]+ x [\d.]+)", "stand")):
                 m = re.search(pat, log)
                 if m and part in ("bezel", "stand"):

@@ -268,10 +268,12 @@ emblem_ridge = 0.45;     // raised line between low-poly facets
 emblem_margin = 5.0;     // emblem width = face width - 2 x margin
 
 /* [Front plate style] */
-// "eagle" = snap-on eagle plate: spread wings and a head that overhang the pebble (default)
+// "crest" = eagle crest: a heraldic eagle in raised relief that stays inside the pebble's
+//           outline (default; see eagle_crest.scad)
+// "eagle" = snap-on eagle plate: spread wings and a head that overhang the pebble
 // "flush" = the original bezel, flush with the pebble, with the engraved low-poly emblem.
 // Only the bezel part and the stand seat change; the body, lid and electronics don't.
-bezel_style = "eagle";
+bezel_style = "crest";
 
 /* [Eagle plate - bezel_style = "eagle"] */
 // The wing is drawn in design units: u runs out from the pebble's side (u = 16 is the
@@ -318,12 +320,15 @@ assert(one_of(storage, ["pololu_sd", "sd_nand"]), str("storage must be \"pololu_
 assert(one_of(board, ["nrf52840", "nrf54lm20a"]), str("board must be \"nrf52840\" or \"nrf54lm20a\", got ", board));
 assert(one_of(mic, ["im73d122", "onboard"]), str("mic must be \"im73d122\" or \"onboard\", got ", mic));
 assert(one_of(preset, ["default", "slim"]), str("preset must be \"default\" or \"slim\", got ", preset));
-assert(one_of(bezel_style, ["eagle", "flush"]), str("bezel_style must be \"eagle\" or \"flush\", got ", bezel_style));
+assert(one_of(bezel_style, ["crest", "eagle", "flush"]), str("bezel_style must be \"crest\", \"eagle\" or \"flush\", got ", bezel_style));
 eagle = (bezel_style == "eagle");
+crest = (bezel_style == "crest");
+pinned = eagle || crest;   // separate peg pins in sockets (the plate prints relief-up)
 
 // PRESET resolution: an explicit value (file or -D) wins, undef takes the preset's value
 function preset_pick(v, dflt, slim) = !is_undef(v) ? v : (preset == "slim" ? slim : dflt);
 bezel_th   = preset_pick(bezel_t, 1.6, 1.0);
+pin_depth = eagle ? pin_sock : max(0.5, bezel_th - 0.45);   // socket depth in the plate's back
 dome_d     = preset_pick(back_depth, 2.6, 1.6);
 
 // ---- the board: every board-specific number goes through these ----
@@ -664,7 +669,7 @@ plate_T    = head_t + 1.0;                             // head plateau + brow / 
 function cap_OW()        = OW;
 function cap_OH()        = OH;
 function cap_zmin()      = -dome_d - (skin_pad ? pad_proud : 0);   // incl. the skin pad
-function cap_ztop()      = eagle ? z_rim + wing_t + relief_max : z_top;   // front face over the pebble
+function cap_ztop()      = eagle ? z_rim + wing_t + relief_max : crest ? z_top + crest_h : z_top;   // front face over the pebble
 function cap_zrim()      = z_rim;
 function cap_mic()       = [mic_x + CX, mic_y + CY, plate_face];
 function cap_switch_y()  = [sw_yc - sw_l / 2 + CY, sw_yc + sw_l / 2 + CY];
@@ -782,6 +787,13 @@ if (skin_pad) {
     assert(pad_floor_left >= pad_floor, str("skin pad: only ", pad_floor_left,
            " mm of shell left under the pocket; raise pad_margin or lower pad_recess"));
     assert(pad_sag <= 0.6, "skin pad: the dome is too deep for a flat-printed pad to bend into; raise pad_margin");
+}
+if (crest) {
+    echo(str("CREST relief ", crest_h, " mm on the bezel face, ", crest_margin, " mm inside the outline (",
+             OW - 2 * crest_margin, " x ", OH - 2 * crest_margin, " mm); capsule ", z_top + crest_h + dome_d,
+             " mm thick over the head; peg sockets ", pin_depth, " mm deep", pin_depth < 1.0 ? " (shallow: glue the pins)" : ""));
+    assert(crest_port_clr >= 1.5, "crest: relief must stay >= 1.5 mm from the mic port edge");
+    assert(crest_h <= 1.6, "crest: keep the relief at or under 1.6 mm (snags, stand seat)");
 }
 if (eagle) {
     assert(wing_over >= 10 && wing_over <= 20, str("eagle wings overhang the pebble ", wing_over,
@@ -1076,6 +1088,7 @@ module lid() {
 // =====================================================================
 module bezel(emblem_depth = 0.5) {
     if (eagle) eagle_plate();
+    else if (crest) crest_bezel();
     else if ($children > 0) flush_bezel(emblem_depth) children();
     else flush_bezel(emblem_depth);
 }
@@ -1236,7 +1249,7 @@ module eagle_tail() for (a = [-34, -17, 0, 17, 34]) {
 
 module eagle_pin() union() {   // stock split peg + a shank for the socket in the plate
     bezel_peg();
-    translate([0, 0, z_rim - 0.01]) cylinder(d = peg_d, h = pin_sock - 0.1 + 0.01, $fn = 24);
+    translate([0, 0, z_rim - 0.01]) cylinder(d = peg_d, h = pin_depth - 0.1 + 0.01, $fn = 24);
 }
 module eagle_pins() peg_positions() eagle_pin();
 
@@ -1355,7 +1368,7 @@ module interference() {   // must render EMPTY
     intersection() {
         electronics();
         // eagle: the plate without its relief (the relief is all above the plate face, clear of the LED pipe)
-        union() { body(); lid(); if (eagle) { eagle_plate(false); eagle_pins(); } else bezel(); }
+        union() { body(); lid(); if (eagle) eagle_plate(false); else if (crest) crest_bezel(false); else bezel(); if (pinned) eagle_pins(); }
     }
 }
 
@@ -1364,8 +1377,12 @@ module print_plate() {
     translate([OW + 8, 0, -z_lid_bot]) lid();                                   // outer face down
     if (eagle) {                                                                // back down, relief up
         translate([2 * OW + 16 + plate_W / 2 - OW / 2, 0, -z_rim]) eagle_plate();
-        for (i = [0 : 2]) translate([OW + 8 + 6 * i, OH / 2 + 14, z_rim + pin_sock - 0.1])
+        for (i = [0 : 2]) translate([OW + 8 + 6 * i, OH / 2 + 14, z_rim + pin_depth - 0.1])
             rotate([180, 0, 0]) eagle_pin();               // pins shank down
+    } else if (crest) {                                                         // back down, relief up
+        translate([2 * OW + 16, 0, -z_rim]) crest_bezel();
+        for (i = [0 : 2]) translate([OW + 8 + 6 * i, OH / 2 + 14, z_rim + pin_depth - 0.1])
+            rotate([180, 0, 0]) eagle_pin();
     } else
         translate([2 * OW + 16, 0, z_top]) rotate([180, 0, 0]) bezel();        // face down
     translate([0, -OH / 2 - 15, 0]) usb_plug();
@@ -1377,7 +1394,7 @@ module assembly() {
     color("Tan") body();
     color("Wheat") lid();
     color("SaddleBrown") bezel();
-    if (eagle) color("Sienna") eagle_pins();
+    if (pinned) color("Sienna") eagle_pins();
     if (skin_pad) color("DarkSlateGray") skin_pad_fitted();
     if (ext_mic) color("DimGray") mic_gasket_fitted();
     electronics();
@@ -1388,9 +1405,11 @@ if (part == "fit_check")    fit_check();
 if (part == "body")         body();
 if (part == "lid")          lid();
 if (part == "bezel")        bezel();
-if (part == "pegs")         for (i = [0 : 2]) translate([6 * i, 0, z_rim + pin_sock - 0.1]) rotate([180, 0, 0]) eagle_pin();
+if (part == "pegs")         for (i = [0 : 2]) translate([6 * i, 0, z_rim + pin_depth - 0.1]) rotate([180, 0, 0]) eagle_pin();
 if (part == "usb_plug")     usb_plug();
 if (part == "gasket")       gasket();
 if (part == "print_plate")  print_plate();
 if (part == "interference") interference();
 if (part == "skin_pad")     skin_pad();
+
+include <eagle_crest.scad>

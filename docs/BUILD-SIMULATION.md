@@ -135,7 +135,7 @@ The milestones are in [FIRMWARE.md](FIRMWARE.md). The MVP is PDM → Opus 24 kbp
 3. The final shell is in **PETG**. PLA softens in a hot car; PETG and ASA don't.
 4. Print the bezel separately (silk/bronze PLA or PETG). See [`concepts/`](../concepts/README.md) for directions.
 
-**Gate 4:** the capsule closes without forcing it, nothing presses on the SD card or USB-C, the cable plugs in fully and the dust cap holds, and the outer size is **≤ ~42 × 50 × 19 mm** (the CAD's 600 mAh core, 41.4 × 49.3 × 18.1; provisional until the CAD has the USB-C slot and mic board) and **≤ ~42 g** with the eagle plate. If it's bigger, see the trade-offs in [`hardware/`](../hardware/README.md).
+**Gate 4:** the capsule closes without forcing it, nothing presses on the SD card or USB-C, the cable plugs in fully and the dust cap holds, and the outer size is **≤ ~42 × 50 × 19 mm** (the CAD's 600 mAh core, 41.4 × 49.3 × 18.1; provisional until the CAD has the USB-C slot and mic board) and **≤ ~42 g** with the eagle crest (~35 g in the CAD). If it's bigger, see the trade-offs in [`hardware/`](../hardware/README.md).
 
 ## Stage 5: final assembly (1 evening)
 
